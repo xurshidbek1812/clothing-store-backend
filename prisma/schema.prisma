@@ -7,108 +7,41 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ==========================================
+// 1. TIZIM VA FOYDALANUVCHILAR
+// ==========================================
 model Store {
-  id        String    @id @default(uuid())
+  id        String   @id @default(uuid())
   name      String
   address   String?
-  users     User[]
-  products  Product[]
-  incomes   Income[]
-  cashboxes Cashbox[]
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  isActive  Boolean  @default(true) // Soft delete
 
-  transfers Transfer[]
-  sales     Sale[]
-  expenses Expense[]
+  users      User[]    @relation("UserStores")
+  categories Category[]
+  products   Product[]
+  incomes    Income[]
+  cashboxes  Cashbox[]
+  transfers  Transfer[]
+  sales      Sale[]
+  expenses   Expense[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model User {
   id        String   @id @default(uuid())
   name      String
   username  String   @unique
-  phone     String   @unique
   password  String
   role      Role     @default(SELLER)
-  storeId   String
-  store     Store    @relation(fields: [storeId], references: [id])
+  isActive  Boolean  @default(true) 
+
+  stores    Store[]   @relation("UserStores")
+  sales     Sale[]    @relation("UserSales") 
+  cashboxes Cashbox[] 
+
   createdAt DateTime @default(now())
-}
-
-model Product {
-  id        String     @id @default(uuid())
-  name      String
-  sku       String     @unique
-  price     Decimal
-  color     String?
-  size      String?
-  stock     Int        @default(0)
-  storeId   String
-  store     Store      @relation(fields: [storeId], references: [id])
-  incomes   Income[]
-  saleItems SaleItem[]
-}
-
-model Sale {
-  id          String     @id @default(uuid())
-  totalAmount Float // Umumiy savdo summasi
-  paymentType String // "NAQD" yoki "PLASTIK"
-  cashboxId   String // Pul qaysi kassaga tushdi
-  date        DateTime   @default(now())
-  storeId     String
-  store       Store      @relation(fields: [storeId], references: [id])
-  cashbox     Cashbox    @relation(fields: [cashboxId], references: [id])
-  items       SaleItem[]
-}
-
-model SaleItem {
-  id        String  @id @default(uuid())
-  saleId    String
-  productId String
-  quantity  Int // Nechta sotildi
-  price     Float // Sotilgan vaqtdagi narxi
-  sale      Sale    @relation(fields: [saleId], references: [id])
-  product   Product @relation(fields: [productId], references: [id])
-}
-
-model Income {
-  id        String   @id @default(uuid())
-  quantity  Int
-  costPrice Decimal
-  productId String
-  product   Product  @relation(fields: [productId], references: [id])
-  storeId   String
-  store     Store    @relation(fields: [storeId], references: [id])
-  date      DateTime @default(now())
-}
-
-model Cashbox {
-  id      String  @id @default(uuid())
-  name    String
-  balance Decimal @default(0)
-  storeId String
-  store   Store   @relation(fields: [storeId], references: [id])
-
-  sales Sale[]
-  expenses Expense[]
-
-  transfersFrom Transfer[] @relation("FromCashbox")
-  transfersTo   Transfer[] @relation("ToCashbox")
-}
-
-model Transfer {
-  id            String   @id @default(uuid())
-  amount        Float // O'tkazma summasi
-  fromCashboxId String // Qaysi kassadan chiqdi
-  toCashboxId   String // Qaysi kassaga tushdi
-  description   String? // Izoh (masalan: "Inkasatsiya")
-  date          DateTime @default(now())
-  storeId       String
-  store         Store    @relation(fields: [storeId], references: [id])
-
-  // Kassalar bilan bog'liqlik
-  fromCashbox Cashbox @relation("FromCashbox", fields: [fromCashboxId], references: [id])
-  toCashbox   Cashbox @relation("ToCashbox", fields: [toCashboxId], references: [id])
 }
 
 enum Role {
@@ -117,10 +50,156 @@ enum Role {
   SELLER
 }
 
+// ==========================================
+// 2. VALYUTA VA KASSA AMALIYOTLARI
+// ==========================================
+model Currency {
+  id        String   @id @default(uuid())
+  name      String   
+  code      String   @unique 
+  symbol    String   
+  rate      Float    
+  isDefault Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+
+  cashboxes Cashbox[]
+}
+
+model Cashbox {
+  id         String   @id @default(uuid())
+  name       String
+  balance    Float    @default(0) 
+  
+  currencyId String
+  currency   Currency @relation(fields: [currencyId], references: [id])
+  
+  storeId    String
+  store      Store    @relation(fields: [storeId], references: [id])
+
+  userId     String?  
+  user       User?    @relation(fields: [userId], references: [id])
+
+  sales       Sale[]
+  expenses    Expense[]
+  transfersFrom Transfer[] @relation("FromCashbox")
+  transfersTo   Transfer[] @relation("ToCashbox")
+}
+
+// ==========================================
+// 3. KATALOG: TOVARLAR VA RAZMERLAR (Boutique)
+// ==========================================
+model Category {
+  id      String    @id @default(uuid())
+  name    String
+  storeId String
+  store   Store     @relation(fields: [storeId], references: [id])
+  
+  products Product[]
+}
+
+// Ota tovar
+model Product {
+  id         String   @id @default(uuid())
+  name       String   // Masalan: "Puma kurtka (Qora)"
+  brand      String?  
+  gender     String?  // Erkaklar, Ayollar, Bolalar, Unisex
+  season     String?  // Kuz/Qish
+  isActive   Boolean  @default(true) 
+
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  storeId    String
+  store      Store    @relation(fields: [storeId], references: [id])
+
+  sizes      Size[]   // Razmerlari
+}
+
+// Bola tovar (Aniq razmer va Shtrixkod)
+model Size {
+  id         String   @id @default(uuid())
+  sizeLabel  String   // "L", "XL", "42"
+  barcode    String   @unique // Har bir razmerning o'z shtrixkodi bo'ladi
+  stock      Int      @default(0) // Qoldiq (Kassa tez ishlashi uchun shu yerda saqlanadi)
+  
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id])
+
+  incomes    Income[]
+  saleItems  SaleItem[]
+}
+
+// ==========================================
+// 4. OMBOR KIRIM VA SAVDO (Partiyali Hisob)
+// ==========================================
+model Income {
+  id         String   @id @default(uuid())
+  quantity   Int      // Qancha keldi?
+  costPrice  Float    // Kelgan narxi (Tan narx)
+  sellPrice  Float    // Sotuv narxi (Aynan shu partiyaning sotuv narxi)
+  
+  sizeId     String   // Qaysi razmer kirim bo'ldi?
+  size       Size     @relation(fields: [sizeId], references: [id])
+  
+  storeId    String
+  store      Store    @relation(fields: [storeId], references: [id])
+  
+  date       DateTime @default(now())
+}
+
+model Sale {
+  id          String   @id @default(uuid())
+  totalAmount Float
+  paymentType String   // "NAQD", "PLASTIK"
+  date        DateTime @default(now())
+
+  storeId     String
+  store       Store    @relation(fields: [storeId], references: [id])
+  
+  cashboxId   String
+  cashbox     Cashbox  @relation(fields: [cashboxId], references: [id])
+
+  userId      String   
+  seller      User     @relation("UserSales", fields: [userId], references: [id])
+
+  items       SaleItem[]
+}
+
+model SaleItem {
+  id        String   @id @default(uuid())
+  quantity  Int
+  price     Float    // O'sha paytdagi sotilgan aniq narxi
+  
+  saleId    String
+  sale      Sale     @relation(fields: [saleId], references: [id])
+  
+  sizeId    String   // Qaysi razmer sotildi?
+  size      Size     @relation(fields: [sizeId], references: [id])
+}
+
+// ==========================================
+// 5. MOLIYA: O'TKAZMALAR VA XARAJATLAR
+// ==========================================
+model Transfer {
+  id            String   @id @default(uuid())
+  amount        Float
+  description   String?
+  date          DateTime @default(now())
+  
+  storeId       String
+  store         Store    @relation(fields: [storeId], references: [id])
+
+  fromCashboxId String
+  fromCashbox   Cashbox  @relation("FromCashbox", fields: [fromCashboxId], references: [id])
+  
+  toCashboxId   String
+  toCashbox     Cashbox  @relation("ToCashbox", fields: [toCashboxId], references: [id])
+}
+
 model Expense {
   id          String   @id @default(uuid())
-  amount      Float    // Xarajat summasi
-  description String   // Nima uchun (masalan: "Ijara puli")
+  amount      Float
+  description String
   date        DateTime @default(now())
   
   cashboxId   String

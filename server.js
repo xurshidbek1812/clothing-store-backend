@@ -4,8 +4,9 @@ import app from './app.js';
 
 dotenv.config();
 
-const PORT = process.env.PORT || 5000;
+// Portni 5050 ga qattiq belgilaymiz (hech kim xalaqit bermasligi uchun)
+const PORT = 5050; 
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+app.listen(PORT, '127.0.0.1', () => {
+  console.log(`Server http://127.0.0.1:${PORT} da yondi 🔥`);
 });

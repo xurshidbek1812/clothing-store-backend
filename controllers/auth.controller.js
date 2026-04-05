@@ -48,36 +48,43 @@ export const register = async (req, res) => {
 
 // 2. TIZIMGA KIRISH (Login)
 export const login = async (req, res) => {
-  try {
-    const { phone, password } = req.body;
+  const { username, password } = req.body; 
 
-    // Userni topamiz
-    const user = await prisma.user.findUnique({ where: { phone } });
+  try {
+    // 1. "store" emas, "stores" deb yozamiz (Prisma shuni talab qildi)
+    const user = await prisma.user.findUnique({ 
+      where: { username },
+      include: { stores: true } // <--- MANA SHU YER TO'G'IRLANDI
+    });
+    
     if (!user) {
-      return res.status(404).json({ message: "Foydalanuvchi topilmadi!" });
+      return res.status(400).json({ message: "Foydalanuvchi topilmadi!" });
     }
 
-    // Parolni tekshiramiz
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) {
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
       return res.status(400).json({ message: "Parol noto'g'ri!" });
     }
 
-    // Token yaratamiz (ichiga user ID va Store ID ni solib qo'yamiz)
     const token = jwt.sign(
-      { id: user.id, role: user.role, storeId: user.storeId },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' } // Token 7 kun yashaydi
+      { id: user.id, role: user.role }, 
+      process.env.JWT_SECRET, 
+      { expiresIn: '1d' }
     );
 
-    res.status(200).json({
-      message: "Muvaffaqiyatli kirdingiz!",
-      token,
-      user: { id: user.id, name: user.name, role: user.role }
+    // 2. "user.stores" allaqachon Array bo'lib keladi, uni to'g'ridan-to'g'ri beramiz
+    res.json({ 
+      token, 
+      user: { 
+        id: user.id, 
+        name: user.name, 
+        username: user.username, 
+        role: user.role,
+        stores: user.stores // <--- MANA SHU YER TO'G'IRLANDI
+      } 
     });
-
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Serverda xatolik yuz berdi" });
+    console.error(error); 
+    res.status(500).json({ message: "Server xatosi!" });
   }
 };

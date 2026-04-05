@@ -27,3 +27,11 @@ export const requireRole = (roles) => {
     next();
   };
 };
+
+// 3. YANGI QO'SHILGAN: Faqat ADMIN (Direktor) ekanligini tekshiruvchi
+export const isAdmin = (req, res, next) => {
+  if (req.user.role !== 'ADMIN') {
+    return res.status(403).json({ message: "Ruxsat etilmaydi! Bu amalni faqat Direktor bajara oladi." });
+  }
+  next();
+};
