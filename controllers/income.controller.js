@@ -1,6 +1,5 @@
-const prisma = require('../prisma/index');
+import { prisma } from '../lib/prisma.js';
 
-// Omborga yangi partiya kirim qilish
 exports.createIncome = async (req, res) => {
   try {
     const { quantity, costPrice, sellPrice, sizeId, storeId } = req.body;

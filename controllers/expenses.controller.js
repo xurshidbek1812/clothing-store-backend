@@ -1,5 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma.js';
 
 export const createExpense = async (req, res) => {
   const { amount, description, cashboxId } = req.body;

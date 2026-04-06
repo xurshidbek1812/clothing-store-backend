@@ -1,5 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma.js';
 
 export const getDashboardStats = async (req, res) => {
   const storeId = req.user.storeId;

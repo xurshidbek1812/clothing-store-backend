@@ -1,7 +1,6 @@
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma.js';
 
 // Foydalanuvchi va do'kon ma'lumotlarini olish
 export const getProfile = async (req, res) => {

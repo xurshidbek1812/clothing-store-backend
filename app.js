@@ -9,6 +9,13 @@ import salesRoutes from './routes/sales.routes.js';
 import analyticsRoutes from './routes/analytics.routes.js';
 import settingsRoutes from './routes/settings.routes.js';
 import adminRoutes from './routes/admin.routes.js';
+import warehousesRoutes from './routes/warehouses.routes.js';
+import suppliersRoutes from './routes/suppliers.routes.js';
+import stockRoutes from './routes/stock.routes.js';
+import returnsRoutes from './routes/returns.routes.js';
+import usersRoutes from './routes/users.routes.js';
+import referenceRoutes from './routes/reference.routes.js';
+import dashboardRoutes from './routes/dashboard.routes.js';
 
 const app = express();
 
@@ -32,6 +39,13 @@ app.use('/api/sales', salesRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/warehouses', warehousesRoutes);
+app.use('/api/suppliers', suppliersRoutes);
+app.use('/api/stock', stockRoutes);
+app.use('/api/returns', returnsRoutes);
+app.use('/api/users', usersRoutes);
+app.use('/api/reference', referenceRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 
 app.get('/', (req, res) => {
   res.json({ message: "Kiyim do'koni API ishlayapti! 🚀" });

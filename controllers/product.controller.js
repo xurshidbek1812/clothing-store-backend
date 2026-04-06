@@ -1,4 +1,4 @@
-const prisma = require('../prisma/index'); // Prisma client manzili
+import { prisma } from '../lib/prisma.js';
 
 // 1. Yangi tovar va uning razmerlarini qo'shish
 exports.createProduct = async (req, res) => {

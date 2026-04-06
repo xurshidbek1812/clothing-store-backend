@@ -7,204 +7,390 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ==========================================
-// 1. TIZIM VA FOYDALANUVCHILAR
-// ==========================================
-model Store {
-  id        String   @id @default(uuid())
-  name      String
-  address   String?
-  isActive  Boolean  @default(true) // Soft delete
-
-  users      User[]    @relation("UserStores")
-  categories Category[]
-  products   Product[]
-  incomes    Income[]
-  cashboxes  Cashbox[]
-  transfers  Transfer[]
-  sales      Sale[]
-  expenses   Expense[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model User {
-  id        String   @id @default(uuid())
-  name      String
-  username  String   @unique
-  password  String
-  role      Role     @default(SELLER)
-  isActive  Boolean  @default(true) 
-
-  stores    Store[]   @relation("UserStores")
-  sales     Sale[]    @relation("UserSales") 
-  cashboxes Cashbox[] 
-
-  createdAt DateTime @default(now())
-}
-
 enum Role {
-  ADMIN
-  MANAGER
+  DIRECTOR
   SELLER
 }
 
-// ==========================================
-// 2. VALYUTA VA KASSA AMALIYOTLARI
-// ==========================================
-model Currency {
-  id        String   @id @default(uuid())
-  name      String   
-  code      String   @unique 
-  symbol    String   
-  rate      Float    
-  isDefault Boolean  @default(false)
-  updatedAt DateTime @updatedAt
+enum SaleType {
+  CASH
+  CREDIT
+}
 
-  cashboxes Cashbox[]
+enum CashTransactionType {
+  SALE_INCOME
+  TRANSFER_IN
+  TRANSFER_OUT
+  EXPENSE
+  MANUAL_IN
+  MANUAL_OUT
+}
+
+enum StockMovementType {
+  SUPPLIER_IN
+  SUPPLIER_RETURN
+  TRANSFER_IN
+  TRANSFER_OUT
+  SALE_OUT
+  CUSTOMER_RETURN
+  INVENTORY_ADJUSTMENT
+}
+
+model Store {
+  id         String   @id @default(uuid())
+  name       String
+  address    String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  userStores         UserStore[]
+  warehouses         Warehouse[]
+  cashboxes          Cashbox[]
+  categories         Category[]
+  expenseCategories  ExpenseCategory[]
+  products           Product[]
+  suppliers          Supplier[]
+  sales              Sale[]
+  stockMovements     StockMovement[]
+  cashTransactions   CashTransaction[]
+  expenses           Expense[]
+}
+
+model User {
+  id           String   @id @default(uuid())
+  fullName     String
+  username     String   @unique
+  passwordHash String
+  role         Role     @default(SELLER)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  userStores        UserStore[]
+  sales             Sale[]
+  cashTransactions  CashTransaction[]
+  stockMovements    StockMovement[]
+  expenses          Expense[]
+  inventoryCounts   InventoryCount[]
+}
+
+model UserStore {
+  id        String   @id @default(uuid())
+  userId    String
+  storeId   String
+  createdAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, storeId])
+}
+
+model Currency {
+  id          String   @id @default(uuid())
+  name        String
+  code        String   @unique
+  symbol      String
+  rate        Float    @default(1)
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  cashboxes         Cashbox[]
+  cashTransactions  CashTransaction[]
 }
 
 model Cashbox {
-  id         String   @id @default(uuid())
-  name       String
-  balance    Float    @default(0) 
-  
-  currencyId String
+  id          String   @id @default(uuid())
+  storeId     String
+  currencyId  String
+  name        String
+  balance     Float    @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  store      Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
   currency   Currency @relation(fields: [currencyId], references: [id])
-  
-  storeId    String
-  store      Store    @relation(fields: [storeId], references: [id])
 
-  userId     String?  
-  user       User?    @relation(fields: [userId], references: [id])
-
-  sales       Sale[]
-  expenses    Expense[]
-  transfersFrom Transfer[] @relation("FromCashbox")
-  transfersTo   Transfer[] @relation("ToCashbox")
+  sales              Sale[]
+  cashTransactions   CashTransaction[]
+  expenses           Expense[]
+  transferFrom       CashTransaction[] @relation("TransferFromCashbox")
+  transferTo         CashTransaction[] @relation("TransferToCashbox")
 }
 
-// ==========================================
-// 3. KATALOG: TOVARLAR VA RAZMERLAR (Boutique)
-// ==========================================
-model Category {
-  id      String    @id @default(uuid())
-  name    String
-  storeId String
-  store   Store     @relation(fields: [storeId], references: [id])
-  
-  products Product[]
+model CashTransaction {
+  id               String              @id @default(uuid())
+  storeId          String
+  cashboxId        String
+  currencyId       String
+  createdById      String
+  type             CashTransactionType
+  amount           Float
+  note             String?
+  relatedSaleId    String?
+  relatedExpenseId String?
+  fromCashboxId    String?
+  toCashboxId      String?
+  createdAt        DateTime            @default(now())
+
+  store        Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  cashbox      Cashbox   @relation(fields: [cashboxId], references: [id], onDelete: Cascade)
+  currency     Currency  @relation(fields: [currencyId], references: [id])
+  createdBy    User      @relation(fields: [createdById], references: [id])
+
+  relatedSale  Sale?     @relation(fields: [relatedSaleId], references: [id])
+  fromCashbox  Cashbox?  @relation("TransferFromCashbox", fields: [fromCashboxId], references: [id])
+  toCashbox    Cashbox?  @relation("TransferToCashbox", fields: [toCashboxId], references: [id])
 }
 
-// Ota tovar
-model Product {
+model Warehouse {
   id         String   @id @default(uuid())
-  name       String   // Masalan: "Puma kurtka (Qora)"
-  brand      String?  
-  gender     String?  // Erkaklar, Ayollar, Bolalar, Unisex
-  season     String?  // Kuz/Qish
-  isActive   Boolean  @default(true) 
-
-  categoryId String
-  category   Category @relation(fields: [categoryId], references: [id])
-
   storeId    String
-  store      Store    @relation(fields: [storeId], references: [id])
+  name       String
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  sizes      Size[]   // Razmerlari
+  store           Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  stockBatches    StockBatch[]
+  stockMovements  StockMovement[]
+  inventoryCounts InventoryCount[]
 }
 
-// Bola tovar (Aniq razmer va Shtrixkod)
+model Supplier {
+  id         String   @id @default(uuid())
+  storeId    String
+  name       String
+  phone      String?
+  address    String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  store        Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  stockBatches StockBatch[]
+}
+
+model Category {
+  id         String   @id @default(uuid())
+  storeId    String
+  name       String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  store    Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@unique([storeId, name])
+}
+
+model ExpenseCategory {
+  id         String   @id @default(uuid())
+  storeId    String
+  name       String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  store     Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  expenses  Expense[]
+
+  @@unique([storeId, name])
+}
+
 model Size {
   id         String   @id @default(uuid())
-  sizeLabel  String   // "L", "XL", "42"
-  barcode    String   @unique // Har bir razmerning o'z shtrixkodi bo'ladi
-  stock      Int      @default(0) // Qoldiq (Kassa tez ishlashi uchun shu yerda saqlanadi)
-  
-  productId  String
-  product    Product  @relation(fields: [productId], references: [id])
+  name       String   @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  incomes    Income[]
-  saleItems  SaleItem[]
+  variants   ProductVariant[]
 }
 
-// ==========================================
-// 4. OMBOR KIRIM VA SAVDO (Partiyali Hisob)
-// ==========================================
-model Income {
-  id         String   @id @default(uuid())
-  quantity   Int      // Qancha keldi?
-  costPrice  Float    // Kelgan narxi (Tan narx)
-  sellPrice  Float    // Sotuv narxi (Aynan shu partiyaning sotuv narxi)
-  
-  sizeId     String   // Qaysi razmer kirim bo'ldi?
-  size       Size     @relation(fields: [sizeId], references: [id])
-  
-  storeId    String
-  store      Store    @relation(fields: [storeId], references: [id])
-  
-  date       DateTime @default(now())
+model Product {
+  id          String   @id @default(uuid())
+  storeId     String
+  categoryId  String?
+  name        String
+  brand       String?
+  gender      String?
+  season      String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  store      Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  category   Category?  @relation(fields: [categoryId], references: [id])
+
+  variants   ProductVariant[]
+}
+
+model ProductVariant {
+  id          String   @id @default(uuid())
+  productId   String
+  sizeId      String
+  barcode     String?  @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  product      Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  size         Size            @relation(fields: [sizeId], references: [id])
+
+  stockBatches   StockBatch[]
+  stockMovements StockMovement[]
+  saleItems      SaleItem[]
+
+  @@unique([productId, sizeId])
+}
+
+model StockBatch {
+  id                String   @id @default(uuid())
+  warehouseId       String
+  productVariantId  String
+  supplierId        String?
+  quantity          Int
+  remainingQuantity Int
+  costPrice         Float
+  sellPrice         Float
+  createdAt         DateTime @default(now())
+
+  warehouse       Warehouse      @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  productVariant  ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+  supplier        Supplier?      @relation(fields: [supplierId], references: [id])
+
+  stockMovements  StockMovement[]
+  saleItems       SaleItem[]
+}
+
+model StockMovement {
+  id                String            @id @default(uuid())
+  storeId           String
+  warehouseId       String
+  productVariantId  String
+  batchId           String?
+  createdById       String?
+  type              StockMovementType
+  quantity          Int
+  note              String?
+  createdAt         DateTime          @default(now())
+
+  store           Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  warehouse       Warehouse       @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  productVariant  ProductVariant  @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+  batch           StockBatch?     @relation(fields: [batchId], references: [id])
+  createdBy       User?           @relation(fields: [createdById], references: [id])
 }
 
 model Sale {
-  id          String   @id @default(uuid())
-  totalAmount Float
-  paymentType String   // "NAQD", "PLASTIK"
-  date        DateTime @default(now())
+  id             String    @id @default(uuid())
+  storeId        String
+  cashboxId      String
+  sellerId       String
+  type           SaleType  @default(CASH)
+  totalAmount    Float
+  paidAmount     Float
+  customerName   String?
+  customerPhone  String?
+  note           String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  storeId     String
-  store       Store    @relation(fields: [storeId], references: [id])
-  
-  cashboxId   String
-  cashbox     Cashbox  @relation(fields: [cashboxId], references: [id])
+  store         Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  cashbox       Cashbox    @relation(fields: [cashboxId], references: [id], onDelete: Cascade)
+  seller        User       @relation(fields: [sellerId], references: [id])
 
-  userId      String   
-  seller      User     @relation("UserSales", fields: [userId], references: [id])
-
-  items       SaleItem[]
+  items         SaleItem[]
+  cashTransactions CashTransaction[]
+  returns       SaleReturn[]
 }
 
 model SaleItem {
-  id        String   @id @default(uuid())
-  quantity  Int
-  price     Float    // O'sha paytdagi sotilgan aniq narxi
-  
-  saleId    String
-  sale      Sale     @relation(fields: [saleId], references: [id])
-  
-  sizeId    String   // Qaysi razmer sotildi?
-  size      Size     @relation(fields: [sizeId], references: [id])
+  id                String   @id @default(uuid())
+  saleId            String
+  productVariantId  String
+  batchId           String?
+  quantity          Int
+  price             Float
+  createdAt         DateTime @default(now())
+
+  sale             Sale            @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productVariant   ProductVariant  @relation(fields: [productVariantId], references: [id])
+  batch            StockBatch?     @relation(fields: [batchId], references: [id])
+
+  returnItems      SaleReturnItem[]
 }
 
-// ==========================================
-// 5. MOLIYA: O'TKAZMALAR VA XARAJATLAR
-// ==========================================
-model Transfer {
-  id            String   @id @default(uuid())
-  amount        Float
-  description   String?
-  date          DateTime @default(now())
-  
-  storeId       String
-  store         Store    @relation(fields: [storeId], references: [id])
+model SaleReturn {
+  id          String   @id @default(uuid())
+  saleId      String
+  storeId     String
+  cashboxId   String?
+  amount      Float
+  reason      String?
+  createdAt   DateTime @default(now())
 
-  fromCashboxId String
-  fromCashbox   Cashbox  @relation("FromCashbox", fields: [fromCashboxId], references: [id])
-  
-  toCashboxId   String
-  toCashbox     Cashbox  @relation("ToCashbox", fields: [toCashboxId], references: [id])
+  sale        Sale      @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  store       Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  cashbox     Cashbox?  @relation(fields: [cashboxId], references: [id])
+
+  items       SaleReturnItem[]
 }
 
 model Expense {
-  id          String   @id @default(uuid())
-  amount      Float
-  description String
-  date        DateTime @default(now())
-  
-  cashboxId   String
-  cashbox     Cashbox  @relation(fields: [cashboxId], references: [id])
-  
-  storeId     String
-  store       Store    @relation(fields: [storeId], references: [id])
+  id                String   @id @default(uuid())
+  storeId           String
+  cashboxId         String
+  expenseCategoryId String?
+  createdById       String?
+  amount            Float
+  note              String?
+  createdAt         DateTime @default(now())
+
+  store             Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  cashbox           Cashbox          @relation(fields: [cashboxId], references: [id], onDelete: Cascade)
+  expenseCategory   ExpenseCategory? @relation(fields: [expenseCategoryId], references: [id])
+  createdBy         User?            @relation(fields: [createdById], references: [id])
+}
+
+model InventoryCount {
+  id           String   @id @default(uuid())
+  storeId      String
+  warehouseId  String
+  createdById  String?
+  note         String?
+  createdAt    DateTime @default(now())
+
+  store        Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  warehouse    Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  createdBy    User?    @relation(fields: [createdById], references: [id])
+
+  items        InventoryCountItem[]
+}
+
+model InventoryCountItem {
+  id               String   @id @default(uuid())
+  inventoryCountId String
+  productVariantId String
+  systemQuantity   Int
+  countedQuantity  Int
+
+  inventoryCount   InventoryCount @relation(fields: [inventoryCountId], references: [id], onDelete: Cascade)
+  productVariant   ProductVariant @relation(fields: [productVariantId], references: [id])
+
+  @@unique([inventoryCountId, productVariantId])
+}
+
+model SaleReturnItem {
+  id           String   @id @default(uuid())
+  saleReturnId String
+  saleItemId   String
+  quantity     Int
+  amount       Float
+
+  saleReturn   SaleReturn @relation(fields: [saleReturnId], references: [id], onDelete: Cascade)
+  saleItem     SaleItem   @relation(fields: [saleItemId], references: [id])
+
+  @@unique([saleReturnId, saleItemId])
 }

@@ -1,9 +1,9 @@
 import express from 'express';
 import {
-  createSale,
-  getSales,
-  getSaleById,
-} from '../controllers/sales.controller.js';
+  createSaleReturn,
+  getSaleReturns,
+  getSaleReturnById,
+} from '../controllers/returns.controller.js';
 import {
   verifyToken,
   requireRole,
@@ -15,13 +15,8 @@ const router = express.Router();
 router.use(verifyToken);
 router.use(resolveStoreAccess);
 
-router.get('/', getSales);
-router.get('/:saleId', getSaleById);
-
-router.post(
-  '/',
-  requireRole(['DIRECTOR', 'SELLER']),
-  createSale
-);
+router.get('/', getSaleReturns);
+router.get('/:returnId', getSaleReturnById);
+router.post('/', requireRole(['DIRECTOR', 'SELLER']), createSaleReturn);
 
 export default router;

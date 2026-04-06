@@ -1,5 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma.js';
 
 export const makeTransfer = async (req, res) => {
   const { fromCashboxId, toCashboxId, amount, description } = req.body;

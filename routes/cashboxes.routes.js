@@ -1,16 +1,27 @@
 import express from 'express';
-import { createCashbox, getCashboxes } from '../controllers/cashboxes.controller.js';
-import { verifyToken, requireRole } from '../middleware/auth.middleware.js';
+import {
+  createCashbox,
+  getCashboxes,
+  getCashboxTransactions,
+  createExpenseFromCashbox,
+  transferBetweenCashboxes,
+} from '../controllers/cashboxes.controller.js';
+import {
+  verifyToken,
+  requireRole,
+  resolveStoreAccess,
+} from '../middleware/auth.middleware.js';
 
 const router = express.Router();
 
-// Hamma route'larni token bilan himoyalaymiz
 router.use(verifyToken);
+router.use(resolveStoreAccess);
 
-// Kassalarni ko'rish huquqi (Admin va Menejerda)
 router.get('/', getCashboxes);
+router.get('/:cashboxId/transactions', getCashboxTransactions);
 
-// Kassa yaratish huquqi faqat ADMIN'da bo'ladi (xavfsizlik uchun)
-router.post('/', requireRole(['ADMIN']), createCashbox);
+router.post('/', requireRole(['DIRECTOR']), createCashbox);
+router.post('/expense', requireRole(['DIRECTOR']), createExpenseFromCashbox);
+router.post('/transfer', requireRole(['DIRECTOR']), transferBetweenCashboxes);
 
 export default router;

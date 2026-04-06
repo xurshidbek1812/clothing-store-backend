@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma.js';
 
 // 1. Yangi kirim qilish (Omborga tovar qo'shish)
 export const addIncome = async (req, res) => {
