@@ -28,7 +28,7 @@ export const createUser = async (req, res) => {
 
     if (!Array.isArray(storeIds) || storeIds.length === 0) {
       return res.status(400).json({
-        message: "Kamida bitta store biriktirilishi kerak",
+        message: "Kamida bitta do'kon biriktirilishi kerak",
       });
     }
 
@@ -44,13 +44,13 @@ export const createUser = async (req, res) => {
 
     const stores = await prisma.store.findMany({
       where: {
-        id: { in: storeIds.map(String) },
+        id: { in: [...new Set(storeIds.map(String))] },
         isActive: true,
       },
-      select: { id: true, name: true },
+      select: { id: true },
     });
 
-    if (stores.length !== new Set(storeIds.map(String)).size) {
+    if (stores.length !== [...new Set(storeIds.map(String))].length) {
       return res.status(404).json({
         message: "Store lardan biri topilmadi",
       });
@@ -88,13 +88,13 @@ export const createUser = async (req, res) => {
     });
 
     return res.status(201).json({
-      message: "Xodim muvaffaqiyatli yaratildi",
+      message: "Xodim yaratildi",
       user,
     });
   } catch (error) {
-    console.error("createUser error:", error);
+    console.error('createUser error:', error);
     return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
+      message: "Server xatosi",
     });
   }
 };
@@ -116,9 +116,9 @@ export const getUsers = async (req, res) => {
 
     return res.json(users);
   } catch (error) {
-    console.error("getUsers error:", error);
+    console.error('getUsers error:', error);
     return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
+      message: "Server xatosi",
     });
   }
 };
@@ -146,9 +146,9 @@ export const getUserById = async (req, res) => {
 
     return res.json(user);
   } catch (error) {
-    console.error("getUserById error:", error);
+    console.error('getUserById error:', error);
     return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
+      message: "Server xatosi",
     });
   }
 };
@@ -167,9 +167,6 @@ export const updateUser = async (req, res) => {
 
     const existingUser = await prisma.user.findUnique({
       where: { id: userId },
-      include: {
-        userStores: true,
-      },
     });
 
     if (!existingUser) {
@@ -199,19 +196,19 @@ export const updateUser = async (req, res) => {
     if (storeIds !== undefined) {
       if (!Array.isArray(storeIds) || storeIds.length === 0) {
         return res.status(400).json({
-          message: "Kamida bitta store biriktirilishi kerak",
+          message: "Kamida bitta do'kon biriktirilishi kerak",
         });
       }
 
       const stores = await prisma.store.findMany({
         where: {
-          id: { in: storeIds.map(String) },
+          id: { in: [...new Set(storeIds.map(String))] },
           isActive: true,
         },
         select: { id: true },
       });
 
-      if (stores.length !== new Set(storeIds.map(String)).size) {
+      if (stores.length !== [...new Set(storeIds.map(String))].length) {
         return res.status(404).json({
           message: "Store lardan biri topilmadi",
         });
@@ -261,13 +258,13 @@ export const updateUser = async (req, res) => {
     });
 
     return res.json({
-      message: "Xodim muvaffaqiyatli yangilandi",
+      message: "Xodim yangilandi",
       user: updatedUser,
     });
   } catch (error) {
-    console.error("updateUser error:", error);
+    console.error('updateUser error:', error);
     return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
+      message: "Server xatosi",
     });
   }
 };

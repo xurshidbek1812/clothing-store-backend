@@ -6,8 +6,8 @@ import {
 } from '../controllers/returns.controller.js';
 import {
   verifyToken,
-  requireRole,
   resolveStoreAccess,
+  requireRole,
 } from '../middleware/auth.middleware.js';
 
 const router = express.Router();
@@ -17,6 +17,11 @@ router.use(resolveStoreAccess);
 
 router.get('/', getSaleReturns);
 router.get('/:returnId', getSaleReturnById);
-router.post('/', requireRole(['DIRECTOR', 'SELLER']), createSaleReturn);
+
+router.post(
+  '/',
+  requireRole(['DIRECTOR', 'SELLER']),
+  createSaleReturn
+);
 
 export default router;

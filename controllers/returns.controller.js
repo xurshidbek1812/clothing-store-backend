@@ -1,12 +1,13 @@
 import pkg from '@prisma/client';
-
-const { CashTransactionType, StockMovementType} = pkg;
-
 import { prisma } from '../lib/prisma.js';
+
+const {
+  CashTransactionType,
+  StockMovementType,
+} = pkg;
 
 export const createSaleReturn = async (req, res) => {
   try {
-    const storeId = req.storeId;
     const {
       saleId,
       cashboxId,
@@ -24,7 +25,7 @@ export const createSaleReturn = async (req, res) => {
     const sale = await prisma.sale.findFirst({
       where: {
         id: saleId,
-        storeId,
+        storeId: req.storeId,
       },
       include: {
         cashbox: {
@@ -63,7 +64,7 @@ export const createSaleReturn = async (req, res) => {
       selectedCashbox = await prisma.cashbox.findFirst({
         where: {
           id: cashboxId,
-          storeId,
+          storeId: req.storeId,
           isActive: true,
         },
         include: {
@@ -84,7 +85,7 @@ export const createSaleReturn = async (req, res) => {
     }));
 
     for (const item of normalizedItems) {
-      if (!item.saleItemId || !item.quantity) {
+      if (!item.saleItemId || item.quantity == null) {
         return res.status(400).json({
           message: "Har bir item uchun saleItemId va quantity majburiy",
         });
@@ -122,13 +123,13 @@ export const createSaleReturn = async (req, res) => {
 
       if (remainingReturnableQty <= 0) {
         return res.status(400).json({
-          message: `${saleItem.productVariant.product.name} (${saleItem.productVariant.size.name}) itemi allaqachon to'liq qaytarilgan`,
+          message: `${saleItem.productVariant.product.name} (${saleItem.productVariant.size.name}) allaqachon to'liq qaytarilgan`,
         });
       }
 
       if (item.quantity > remainingReturnableQty) {
         return res.status(400).json({
-          message: `${saleItem.productVariant.product.name} (${saleItem.productVariant.size.name}) uchun qaytarish miqdori sotilgan miqdordan oshib ketdi`,
+          message: `${saleItem.productVariant.product.name} (${saleItem.productVariant.size.name}) uchun qaytarish miqdori oshib ketdi`,
         });
       }
 
@@ -146,43 +147,39 @@ export const createSaleReturn = async (req, res) => {
 
     if (finalRefundAmount > calculatedRefundAmount) {
       return res.status(400).json({
-        message: "refundAmount maksimal qaytariladigan summadan katta bo'lishi mumkin emas",
+        message: "refundAmount maksimal summadan katta bo'lishi mumkin emas",
       });
     }
 
     if (finalRefundAmount > 0) {
-      const cashboxForRefund = selectedCashbox || sale.cashbox;
+      const refundCashbox = selectedCashbox || sale.cashbox;
 
-      if (!cashboxForRefund) {
+      if (!refundCashbox) {
         return res.status(400).json({
           message: "Pul qaytarish uchun kassa topilmadi",
         });
       }
 
-      if (cashboxForRefund.balance < finalRefundAmount) {
+      if (refundCashbox.balance < finalRefundAmount) {
         return res.status(400).json({
           message: "Kassada qaytarish uchun mablag' yetarli emas",
         });
       }
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      const saleReturn = await tx.saleReturn.create({
+    const saleReturn = await prisma.$transaction(async (tx) => {
+      const createdReturn = await tx.saleReturn.create({
         data: {
           saleId,
-          storeId,
+          storeId: req.storeId,
           cashboxId: finalRefundAmount > 0 ? (cashboxId || sale.cashboxId) : null,
           amount: finalRefundAmount,
-          reason: reason || null,
+          reason: reason ? String(reason).trim() : null,
         },
       });
 
       for (const item of normalizedItems) {
         const saleItem = saleItemMap.get(item.saleItemId);
-
-        if (!saleItem.batchId) {
-          throw new Error(`Sale item batchId topilmadi: ${saleItem.id}`);
-        }
 
         await tx.stockBatch.update({
           where: { id: saleItem.batchId },
@@ -195,7 +192,7 @@ export const createSaleReturn = async (req, res) => {
 
         await tx.saleReturnItem.create({
           data: {
-            saleReturnId: saleReturn.id,
+            saleReturnId: createdReturn.id,
             saleItemId: saleItem.id,
             quantity: item.quantity,
             amount: item.quantity * saleItem.price,
@@ -204,14 +201,14 @@ export const createSaleReturn = async (req, res) => {
 
         await tx.stockMovement.create({
           data: {
-            storeId,
+            storeId: req.storeId,
             warehouseId: saleItem.batch.warehouseId,
             productVariantId: saleItem.productVariantId,
             batchId: saleItem.batchId,
             createdById: req.user.id,
             type: StockMovementType.CUSTOMER_RETURN,
             quantity: item.quantity,
-            note: `Qaytarish #${saleReturn.id}`,
+            note: `Qaytarish #${createdReturn.id}`,
           },
         });
       }
@@ -231,19 +228,20 @@ export const createSaleReturn = async (req, res) => {
 
         await tx.cashTransaction.create({
           data: {
-            storeId,
+            storeId: req.storeId,
             cashboxId: refundCashboxId,
             currencyId: refundCashbox.currencyId,
             createdById: req.user.id,
-            type: CashTransactionType.MANUAL_OUT,
+            type: CashTransactionType.SALE_RETURN_OUT,
             amount: finalRefundAmount,
-            note: `Savdo qaytarishi #${saleReturn.id}`,
+            note: `Savdo qaytarishi #${createdReturn.id}`,
+            relatedReturnId: createdReturn.id,
           },
         });
       }
 
-      const fullReturn = await tx.saleReturn.findUnique({
-        where: { id: saleReturn.id },
+      return tx.saleReturn.findUnique({
+        where: { id: createdReturn.id },
         include: {
           cashbox: {
             include: {
@@ -283,89 +281,71 @@ export const createSaleReturn = async (req, res) => {
           },
         },
       });
-
-      return fullReturn;
     });
 
     return res.status(201).json({
-      message: "Tovar qaytarish muvaffaqiyatli bajarildi",
-      saleReturn: result,
+      message: "Qaytarish muvaffaqiyatli bajarildi",
+      saleReturn,
     });
   } catch (error) {
-    console.error("createSaleReturn error:", error);
+    console.error('createSaleReturn error:', error);
     return res.status(500).json({
-      message: error.message || "Serverda xatolik yuz berdi",
+      message: "Server xatosi",
     });
   }
 };
 
 export const getSaleReturns = async (req, res) => {
   try {
-    const storeId = req.storeId;
-    const page = Number(req.query.page) || 1;
-    const limit = Number(req.query.limit) || 20;
-    const skip = (page - 1) * limit;
-
-    const where = { storeId };
-
-    const [returns, totalItems] = await Promise.all([
-      prisma.saleReturn.findMany({
-        where,
-        include: {
-          cashbox: {
-            include: {
-              currency: true,
-            },
+    const returns = await prisma.saleReturn.findMany({
+      where: {
+        storeId: req.storeId,
+      },
+      include: {
+        cashbox: {
+          include: {
+            currency: true,
           },
-          sale: {
-            include: {
-              seller: {
-                select: {
-                  id: true,
-                  fullName: true,
-                  username: true,
-                },
+        },
+        sale: {
+          include: {
+            seller: {
+              select: {
+                id: true,
+                fullName: true,
+                username: true,
               },
             },
           },
-          _count: {
-            select: {
-              items: true,
-            },
+        },
+        _count: {
+          select: {
+            items: true,
           },
         },
-        orderBy: {
-          createdAt: 'desc',
-        },
-        skip,
-        take: limit,
-      }),
-      prisma.saleReturn.count({ where }),
-    ]);
-
-    return res.json({
-      returns,
-      totalPages: Math.ceil(totalItems / limit),
-      currentPage: page,
-      totalItems,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
     });
+
+    return res.json(returns);
   } catch (error) {
-    console.error("getSaleReturns error:", error);
+    console.error('getSaleReturns error:', error);
     return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
+      message: "Server xatosi",
     });
   }
 };
 
 export const getSaleReturnById = async (req, res) => {
   try {
-    const storeId = req.storeId;
     const { returnId } = req.params;
 
     const saleReturn = await prisma.saleReturn.findFirst({
       where: {
         id: returnId,
-        storeId,
+        storeId: req.storeId,
       },
       include: {
         cashbox: {
@@ -424,9 +404,9 @@ export const getSaleReturnById = async (req, res) => {
 
     return res.json(saleReturn);
   } catch (error) {
-    console.error("getSaleReturnById error:", error);
+    console.error('getSaleReturnById error:', error);
     return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
+      message: "Server xatosi",
     });
   }
 };

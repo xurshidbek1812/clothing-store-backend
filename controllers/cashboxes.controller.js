@@ -1,30 +1,15 @@
 import pkg from '@prisma/client';
+import { prisma } from '../lib/prisma.js';
 
 const { CashTransactionType } = pkg;
-
-import { prisma } from '../lib/prisma.js';
 
 export const createCashbox = async (req, res) => {
   try {
     const { name, currencyId, openingBalance } = req.body;
-    const storeId = req.storeId;
 
     if (!name || !currencyId) {
       return res.status(400).json({
         message: "name va currencyId majburiy",
-      });
-    }
-
-    const existing = await prisma.cashbox.findFirst({
-      where: {
-        storeId,
-        name: name.trim(),
-      },
-    });
-
-    if (existing) {
-      return res.status(400).json({
-        message: "Bu nomdagi kassa shu do'konda allaqachon mavjud",
       });
     }
 
@@ -40,12 +25,12 @@ export const createCashbox = async (req, res) => {
 
     const balance = Number(openingBalance) || 0;
 
-    const result = await prisma.$transaction(async (tx) => {
-      const cashbox = await tx.cashbox.create({
+    const cashbox = await prisma.$transaction(async (tx) => {
+      const created = await tx.cashbox.create({
         data: {
-          storeId,
+          storeId: req.storeId,
           currencyId,
-          name: name.trim(),
+          name: String(name).trim(),
           balance,
         },
         include: {
@@ -56,9 +41,9 @@ export const createCashbox = async (req, res) => {
       if (balance > 0) {
         await tx.cashTransaction.create({
           data: {
-            storeId,
-            cashboxId: cashbox.id,
-            currencyId,
+            storeId: req.storeId,
+            cashboxId: created.id,
+            currencyId: created.currencyId,
             createdById: req.user.id,
             type: CashTransactionType.MANUAL_IN,
             amount: balance,
@@ -67,28 +52,26 @@ export const createCashbox = async (req, res) => {
         });
       }
 
-      return cashbox;
+      return created;
     });
 
     return res.status(201).json({
-      message: "Kassa muvaffaqiyatli yaratildi",
-      cashbox: result,
+      message: "Kassa yaratildi",
+      cashbox,
     });
   } catch (error) {
-    console.error("createCashbox error:", error);
+    console.error('createCashbox error:', error);
     return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
+      message: "Server xatosi",
     });
   }
 };
 
 export const getCashboxes = async (req, res) => {
   try {
-    const storeId = req.storeId;
-
     const cashboxes = await prisma.cashbox.findMany({
       where: {
-        storeId,
+        storeId: req.storeId,
         isActive: true,
       },
       include: {
@@ -101,22 +84,21 @@ export const getCashboxes = async (req, res) => {
 
     return res.json(cashboxes);
   } catch (error) {
-    console.error("getCashboxes error:", error);
+    console.error('getCashboxes error:', error);
     return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
+      message: "Server xatosi",
     });
   }
 };
 
 export const getCashboxTransactions = async (req, res) => {
   try {
-    const storeId = req.storeId;
     const { cashboxId } = req.params;
 
     const cashbox = await prisma.cashbox.findFirst({
       where: {
         id: cashboxId,
-        storeId,
+        storeId: req.storeId,
       },
     });
 
@@ -128,7 +110,7 @@ export const getCashboxTransactions = async (req, res) => {
 
     const transactions = await prisma.cashTransaction.findMany({
       where: {
-        storeId,
+        storeId: req.storeId,
         cashboxId,
       },
       include: {
@@ -148,16 +130,15 @@ export const getCashboxTransactions = async (req, res) => {
 
     return res.json(transactions);
   } catch (error) {
-    console.error("getCashboxTransactions error:", error);
+    console.error('getCashboxTransactions error:', error);
     return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
+      message: "Server xatosi",
     });
   }
 };
 
 export const createExpenseFromCashbox = async (req, res) => {
   try {
-    const storeId = req.storeId;
     const { cashboxId, expenseCategoryId, amount, note } = req.body;
 
     if (!cashboxId || !amount) {
@@ -177,7 +158,7 @@ export const createExpenseFromCashbox = async (req, res) => {
     const cashbox = await prisma.cashbox.findFirst({
       where: {
         id: cashboxId,
-        storeId,
+        storeId: req.storeId,
       },
       include: {
         currency: true,
@@ -200,7 +181,7 @@ export const createExpenseFromCashbox = async (req, res) => {
       const expenseCategory = await prisma.expenseCategory.findFirst({
         where: {
           id: expenseCategoryId,
-          storeId,
+          storeId: req.storeId,
         },
       });
 
@@ -211,10 +192,10 @@ export const createExpenseFromCashbox = async (req, res) => {
       }
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      const expense = await tx.expense.create({
+    const expense = await prisma.$transaction(async (tx) => {
+      const createdExpense = await tx.expense.create({
         data: {
-          storeId,
+          storeId: req.storeId,
           cashboxId,
           expenseCategoryId: expenseCategoryId || null,
           createdById: req.user.id,
@@ -234,35 +215,34 @@ export const createExpenseFromCashbox = async (req, res) => {
 
       await tx.cashTransaction.create({
         data: {
-          storeId,
+          storeId: req.storeId,
           cashboxId,
           currencyId: cashbox.currencyId,
           createdById: req.user.id,
           type: CashTransactionType.EXPENSE,
           amount: parsedAmount,
           note: note || "Xarajat chiqimi",
-          relatedExpenseId: expense.id,
+          relatedExpenseId: createdExpense.id,
         },
       });
 
-      return expense;
+      return createdExpense;
     });
 
     return res.status(201).json({
-      message: "Xarajat muvaffaqiyatli kiritildi",
-      expense: result,
+      message: "Xarajat yaratildi",
+      expense,
     });
   } catch (error) {
-    console.error("createExpenseFromCashbox error:", error);
+    console.error('createExpenseFromCashbox error:', error);
     return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
+      message: "Server xatosi",
     });
   }
 };
 
 export const transferBetweenCashboxes = async (req, res) => {
   try {
-    const storeId = req.storeId;
     const { fromCashboxId, toCashboxId, amount, note } = req.body;
 
     if (!fromCashboxId || !toCashboxId || !amount) {
@@ -287,10 +267,16 @@ export const transferBetweenCashboxes = async (req, res) => {
 
     const [fromCashbox, toCashbox] = await Promise.all([
       prisma.cashbox.findFirst({
-        where: { id: fromCashboxId, storeId },
+        where: {
+          id: fromCashboxId,
+          storeId: req.storeId,
+        },
       }),
       prisma.cashbox.findFirst({
-        where: { id: toCashboxId, storeId },
+        where: {
+          id: toCashboxId,
+          storeId: req.storeId,
+        },
       }),
     ]);
 
@@ -302,7 +288,7 @@ export const transferBetweenCashboxes = async (req, res) => {
 
     if (fromCashbox.currencyId !== toCashbox.currencyId) {
       return res.status(400).json({
-        message: "Hozircha faqat bir xil valyutadagi kassalar o'rtasida o'tkazma mumkin",
+        message: "Faqat bir xil valyutada o'tkazma mumkin",
       });
     }
 
@@ -333,7 +319,7 @@ export const transferBetweenCashboxes = async (req, res) => {
 
       await tx.cashTransaction.create({
         data: {
-          storeId,
+          storeId: req.storeId,
           cashboxId: fromCashboxId,
           currencyId: fromCashbox.currencyId,
           createdById: req.user.id,
@@ -347,7 +333,7 @@ export const transferBetweenCashboxes = async (req, res) => {
 
       await tx.cashTransaction.create({
         data: {
-          storeId,
+          storeId: req.storeId,
           cashboxId: toCashboxId,
           currencyId: toCashbox.currencyId,
           createdById: req.user.id,
@@ -361,12 +347,12 @@ export const transferBetweenCashboxes = async (req, res) => {
     });
 
     return res.json({
-      message: "Kassalar orasida o'tkazma muvaffaqiyatli bajarildi",
+      message: "Kassalar orasida o'tkazma bajarildi",
     });
   } catch (error) {
-    console.error("transferBetweenCashboxes error:", error);
+    console.error('transferBetweenCashboxes error:', error);
     return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
+      message: "Server xatosi",
     });
   }
 };

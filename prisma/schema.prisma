@@ -24,6 +24,7 @@ enum CashTransactionType {
   EXPENSE
   MANUAL_IN
   MANUAL_OUT
+  SALE_RETURN_OUT
 }
 
 enum StockMovementType {
@@ -36,25 +37,41 @@ enum StockMovementType {
   INVENTORY_ADJUSTMENT
 }
 
-model Store {
-  id         String   @id @default(uuid())
-  name       String
-  address    String?
-  isActive   Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+enum SupplierPaymentSource {
+  CASHBOX
+  OTHER
+}
 
-  userStores         UserStore[]
-  warehouses         Warehouse[]
-  cashboxes          Cashbox[]
-  categories         Category[]
-  expenseCategories  ExpenseCategory[]
-  products           Product[]
-  suppliers          Supplier[]
-  sales              Sale[]
-  stockMovements     StockMovement[]
-  cashTransactions   CashTransaction[]
-  expenses           Expense[]
+enum SupplierInStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Store {
+  id        String   @id @default(uuid())
+  name      String
+  address   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userStores            UserStore[]
+  warehouses            Warehouse[]
+  cashboxes             Cashbox[]
+  categories            Category[]
+  expenseCategories     ExpenseCategory[]
+  products              Product[]
+  suppliers             Supplier[]
+  sales                 Sale[]
+  saleReturns           SaleReturn[]
+  stockMovements        StockMovement[]
+  cashTransactions      CashTransaction[]
+  expenses              Expense[]
+  inventoryCounts       InventoryCount[]
+  supplierLedgerEntries SupplierLedgerEntry[]
+  supplierPayments      SupplierPayment[]
+  supplierIns           SupplierIn[]
 }
 
 model User {
@@ -67,12 +84,15 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  userStores        UserStore[]
-  sales             Sale[]
-  cashTransactions  CashTransaction[]
-  stockMovements    StockMovement[]
-  expenses          Expense[]
-  inventoryCounts   InventoryCount[]
+  userStores           UserStore[]
+  sales                Sale[]
+  cashTransactions     CashTransaction[]
+  stockMovements       StockMovement[]
+  expenses             Expense[]
+  inventoryCounts      InventoryCount[]
+  supplierPayments     SupplierPayment[]
+  submittedSupplierIns SupplierIn[]      @relation("SupplierInSubmittedBy")
+  approvedSupplierIns  SupplierIn[]      @relation("SupplierInApprovedBy")
 }
 
 model UserStore {
@@ -88,37 +108,41 @@ model UserStore {
 }
 
 model Currency {
-  id          String   @id @default(uuid())
-  name        String
-  code        String   @unique
-  symbol      String
-  rate        Float    @default(1)
-  isDefault   Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  name      String
+  code      String   @unique
+  symbol    String
+  rate      Float    @default(1)
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  cashboxes         Cashbox[]
-  cashTransactions  CashTransaction[]
+  cashboxes        Cashbox[]
+  cashTransactions CashTransaction[]
 }
 
 model Cashbox {
-  id          String   @id @default(uuid())
-  storeId     String
-  currencyId  String
-  name        String
-  balance     Float    @default(0)
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(uuid())
+  storeId    String
+  currencyId String
+  name       String
+  balance    Float    @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  store      Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  currency   Currency @relation(fields: [currencyId], references: [id])
+  store    Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  currency Currency @relation(fields: [currencyId], references: [id])
 
-  sales              Sale[]
-  cashTransactions   CashTransaction[]
-  expenses           Expense[]
-  transferFrom       CashTransaction[] @relation("TransferFromCashbox")
-  transferTo         CashTransaction[] @relation("TransferToCashbox")
+  sales            Sale[]
+  saleReturns      SaleReturn[]
+  cashTransactions CashTransaction[]
+  expenses         Expense[]
+  supplierPayments SupplierPayment[]
+  transferFrom     CashTransaction[] @relation("TransferFromCashbox")
+  transferTo       CashTransaction[] @relation("TransferToCashbox")
+
+  @@unique([storeId, name])
 }
 
 model CashTransaction {
@@ -132,54 +156,98 @@ model CashTransaction {
   note             String?
   relatedSaleId    String?
   relatedExpenseId String?
+  relatedReturnId  String?
   fromCashboxId    String?
   toCashboxId      String?
   createdAt        DateTime            @default(now())
 
-  store        Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  cashbox      Cashbox   @relation(fields: [cashboxId], references: [id], onDelete: Cascade)
-  currency     Currency  @relation(fields: [currencyId], references: [id])
-  createdBy    User      @relation(fields: [createdById], references: [id])
-
-  relatedSale  Sale?     @relation(fields: [relatedSaleId], references: [id])
-  fromCashbox  Cashbox?  @relation("TransferFromCashbox", fields: [fromCashboxId], references: [id])
-  toCashbox    Cashbox?  @relation("TransferToCashbox", fields: [toCashboxId], references: [id])
+  store         Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  cashbox       Cashbox     @relation(fields: [cashboxId], references: [id], onDelete: Cascade)
+  currency      Currency    @relation(fields: [currencyId], references: [id])
+  createdBy     User        @relation(fields: [createdById], references: [id])
+  relatedSale   Sale?       @relation(fields: [relatedSaleId], references: [id])
+  relatedReturn SaleReturn? @relation(fields: [relatedReturnId], references: [id])
+  fromCashbox   Cashbox?    @relation("TransferFromCashbox", fields: [fromCashboxId], references: [id])
+  toCashbox     Cashbox?    @relation("TransferToCashbox", fields: [toCashboxId], references: [id])
 }
 
 model Warehouse {
-  id         String   @id @default(uuid())
-  storeId    String
-  name       String
-  isActive   Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(uuid())
+  storeId   String
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  store           Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  store           Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
   stockBatches    StockBatch[]
   stockMovements  StockMovement[]
   inventoryCounts InventoryCount[]
+  supplierIns     SupplierIn[]
+
+  @@unique([storeId, name])
 }
 
 model Supplier {
-  id         String   @id @default(uuid())
-  storeId    String
-  name       String
-  phone      String?
-  address    String?
-  isActive   Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(uuid())
+  storeId   String
+  name      String
+  phone     String?
+  address   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  store        Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  stockBatches StockBatch[]
+  store         Store                 @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  stockBatches  StockBatch[]
+  ledgerEntries SupplierLedgerEntry[]
+  payments      SupplierPayment[]
+  supplierIns   SupplierIn[]
+
+  @@unique([storeId, name])
+}
+
+model SupplierLedgerEntry {
+  id          String   @id @default(uuid())
+  storeId     String
+  supplierId  String
+  totalAmount Float
+  paidAmount  Float    @default(0)
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  store    Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  payments SupplierPayment[]
+}
+
+model SupplierPayment {
+  id            String                @id @default(uuid())
+  storeId       String
+  supplierId    String
+  ledgerEntryId String?
+  cashboxId     String?
+  createdById   String?
+  source        SupplierPaymentSource
+  amount        Float
+  note          String?
+  createdAt     DateTime              @default(now())
+
+  store       Store                @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  supplier    Supplier             @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  ledgerEntry SupplierLedgerEntry? @relation(fields: [ledgerEntryId], references: [id])
+  cashbox     Cashbox?             @relation(fields: [cashboxId], references: [id])
+  createdBy   User?                @relation(fields: [createdById], references: [id])
 }
 
 model Category {
-  id         String   @id @default(uuid())
-  storeId    String
-  name       String
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(uuid())
+  storeId   String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   store    Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
   products Product[]
@@ -188,59 +256,64 @@ model Category {
 }
 
 model ExpenseCategory {
-  id         String   @id @default(uuid())
-  storeId    String
-  name       String
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(uuid())
+  storeId   String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  store     Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  expenses  Expense[]
+  store    Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  expenses Expense[]
 
   @@unique([storeId, name])
 }
 
 model Size {
-  id         String   @id @default(uuid())
-  name       String   @unique
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(uuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  variants   ProductVariant[]
+  variants ProductVariant[]
 }
 
 model Product {
-  id          String   @id @default(uuid())
-  storeId     String
-  categoryId  String?
-  name        String
-  brand       String?
-  gender      String?
-  season      String?
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(uuid())
+  storeId    String
+  categoryId String?
+  name       String
+  brand      String?
+  gender     String?
+  season     String?
+  imageUrl   String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  store      Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  category   Category?  @relation(fields: [categoryId], references: [id])
+  store    Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  category Category? @relation(fields: [categoryId], references: [id])
 
-  variants   ProductVariant[]
+  variants ProductVariant[]
+
+  @@index([storeId, name])
 }
 
 model ProductVariant {
-  id          String   @id @default(uuid())
-  productId   String
-  sizeId      String
-  barcode     String?  @unique
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  productId String
+  sizeId    String
+  barcode   String?  @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  product      Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
-  size         Size            @relation(fields: [sizeId], references: [id])
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  size    Size    @relation(fields: [sizeId], references: [id])
 
-  stockBatches   StockBatch[]
-  stockMovements StockMovement[]
-  saleItems      SaleItem[]
+  stockBatches        StockBatch[]
+  stockMovements      StockMovement[]
+  saleItems           SaleItem[]
+  inventoryCountItems InventoryCountItem[]
+  supplierInItems     SupplierInItem[]
 
   @@unique([productId, sizeId])
 }
@@ -256,86 +329,143 @@ model StockBatch {
   sellPrice         Float
   createdAt         DateTime @default(now())
 
-  warehouse       Warehouse      @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
-  productVariant  ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
-  supplier        Supplier?      @relation(fields: [supplierId], references: [id])
+  warehouse      Warehouse      @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  productVariant ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+  supplier       Supplier?      @relation(fields: [supplierId], references: [id])
 
-  stockMovements  StockMovement[]
-  saleItems       SaleItem[]
+  stockMovements StockMovement[]
+  saleItems      SaleItem[]
 }
 
 model StockMovement {
-  id                String            @id @default(uuid())
-  storeId           String
-  warehouseId       String
-  productVariantId  String
-  batchId           String?
-  createdById       String?
-  type              StockMovementType
-  quantity          Int
-  note              String?
-  createdAt         DateTime          @default(now())
+  id               String            @id @default(uuid())
+  storeId          String
+  warehouseId      String
+  productVariantId String
+  batchId          String?
+  createdById      String?
+  type             StockMovementType
+  quantity         Int
+  note             String?
+  createdAt        DateTime          @default(now())
 
-  store           Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  warehouse       Warehouse       @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
-  productVariant  ProductVariant  @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
-  batch           StockBatch?     @relation(fields: [batchId], references: [id])
-  createdBy       User?           @relation(fields: [createdById], references: [id])
+  store          Store          @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  warehouse      Warehouse      @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  productVariant ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+  batch          StockBatch?    @relation(fields: [batchId], references: [id])
+  createdBy      User?          @relation(fields: [createdById], references: [id])
+}
+
+model SupplierIn {
+  id            String           @id @default(uuid())
+  storeId       String
+  warehouseId   String
+  supplierId    String
+  submittedById String
+  approvedById  String?
+  status        SupplierInStatus @default(PENDING)
+  note          String?
+  createdAt     DateTime         @default(now())
+  approvedAt    DateTime?
+
+  store       Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  supplier    Supplier  @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  submittedBy User      @relation("SupplierInSubmittedBy", fields: [submittedById], references: [id])
+  approvedBy  User?     @relation("SupplierInApprovedBy", fields: [approvedById], references: [id])
+
+  items SupplierInItem[]
+}
+
+model SupplierInItem {
+  id               String @id @default(uuid())
+  supplierInId     String
+  productVariantId String
+  quantity         Int
+  costPrice        Float
+  sellPrice        Float
+
+  supplierIn     SupplierIn     @relation(fields: [supplierInId], references: [id], onDelete: Cascade)
+  productVariant ProductVariant @relation(fields: [productVariantId], references: [id])
+
+  @@unique([supplierInId, productVariantId])
 }
 
 model Sale {
-  id             String    @id @default(uuid())
-  storeId        String
-  cashboxId      String
-  sellerId       String
-  type           SaleType  @default(CASH)
+  id        String   @id @default(uuid())
+  storeId   String
+  cashboxId String
+  sellerId  String
+  type      SaleType @default(CASH)
+
+  subtotalAmount Float @default(0)
+  discountAmount Float @default(0)
   totalAmount    Float
   paidAmount     Float
-  customerName   String?
-  customerPhone  String?
-  note           String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
 
-  store         Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  cashbox       Cashbox    @relation(fields: [cashboxId], references: [id], onDelete: Cascade)
-  seller        User       @relation(fields: [sellerId], references: [id])
+  customerName  String?
+  customerPhone String?
+  note          String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  items         SaleItem[]
-  cashTransactions CashTransaction[]
-  returns       SaleReturn[]
+  store   Store   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  cashbox Cashbox @relation(fields: [cashboxId], references: [id], onDelete: Cascade)
+  seller  User    @relation(fields: [sellerId], references: [id])
+
+  items           SaleItem[]
+  returns         SaleReturn[]
+  CashTransaction CashTransaction[]
 }
 
 model SaleItem {
-  id                String   @id @default(uuid())
-  saleId            String
-  productVariantId  String
-  batchId           String?
-  quantity          Int
-  price             Float
-  createdAt         DateTime @default(now())
+  id               String  @id @default(uuid())
+  saleId           String
+  productVariantId String
+  batchId          String?
+  quantity         Int
 
-  sale             Sale            @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  productVariant   ProductVariant  @relation(fields: [productVariantId], references: [id])
-  batch            StockBatch?     @relation(fields: [batchId], references: [id])
+  unitPrice      Float
+  discountAmount Float @default(0)
+  totalPrice     Float
 
-  returnItems      SaleReturnItem[]
+  createdAt DateTime @default(now())
+
+  sale           Sale           @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productVariant ProductVariant @relation(fields: [productVariantId], references: [id])
+  batch          StockBatch?    @relation(fields: [batchId], references: [id])
+
+  returnItems SaleReturnItem[]
 }
 
 model SaleReturn {
-  id          String   @id @default(uuid())
-  saleId      String
-  storeId     String
-  cashboxId   String?
-  amount      Float
-  reason      String?
-  createdAt   DateTime @default(now())
+  id        String   @id @default(uuid())
+  saleId    String
+  storeId   String
+  cashboxId String?
+  amount    Float
+  reason    String?
+  createdAt DateTime @default(now())
 
-  sale        Sale      @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  store       Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  cashbox     Cashbox?  @relation(fields: [cashboxId], references: [id])
+  sale    Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  store   Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  cashbox Cashbox? @relation(fields: [cashboxId], references: [id])
 
-  items       SaleReturnItem[]
+  items           SaleReturnItem[]
+  CashTransaction CashTransaction[]
+}
+
+model SaleReturnItem {
+  id           String @id @default(uuid())
+  saleReturnId String
+  saleItemId   String
+  quantity     Int
+  amount       Float
+
+  saleReturn SaleReturn @relation(fields: [saleReturnId], references: [id], onDelete: Cascade)
+  saleItem   SaleItem   @relation(fields: [saleItemId], references: [id])
+
+  @@unique([saleReturnId, saleItemId])
 }
 
 model Expense {
@@ -348,49 +478,36 @@ model Expense {
   note              String?
   createdAt         DateTime @default(now())
 
-  store             Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  cashbox           Cashbox          @relation(fields: [cashboxId], references: [id], onDelete: Cascade)
-  expenseCategory   ExpenseCategory? @relation(fields: [expenseCategoryId], references: [id])
-  createdBy         User?            @relation(fields: [createdById], references: [id])
+  store           Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  cashbox         Cashbox          @relation(fields: [cashboxId], references: [id], onDelete: Cascade)
+  expenseCategory ExpenseCategory? @relation(fields: [expenseCategoryId], references: [id])
+  createdBy       User?            @relation(fields: [createdById], references: [id])
 }
 
 model InventoryCount {
-  id           String   @id @default(uuid())
-  storeId      String
-  warehouseId  String
-  createdById  String?
-  note         String?
-  createdAt    DateTime @default(now())
+  id          String   @id @default(uuid())
+  storeId     String
+  warehouseId String
+  createdById String?
+  note        String?
+  createdAt   DateTime @default(now())
 
-  store        Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  warehouse    Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
-  createdBy    User?    @relation(fields: [createdById], references: [id])
+  store     Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  createdBy User?     @relation(fields: [createdById], references: [id])
 
-  items        InventoryCountItem[]
+  items InventoryCountItem[]
 }
 
 model InventoryCountItem {
-  id               String   @id @default(uuid())
+  id               String @id @default(uuid())
   inventoryCountId String
   productVariantId String
   systemQuantity   Int
   countedQuantity  Int
 
-  inventoryCount   InventoryCount @relation(fields: [inventoryCountId], references: [id], onDelete: Cascade)
-  productVariant   ProductVariant @relation(fields: [productVariantId], references: [id])
+  inventoryCount InventoryCount @relation(fields: [inventoryCountId], references: [id], onDelete: Cascade)
+  productVariant ProductVariant @relation(fields: [productVariantId], references: [id])
 
   @@unique([inventoryCountId, productVariantId])
-}
-
-model SaleReturnItem {
-  id           String   @id @default(uuid())
-  saleReturnId String
-  saleItemId   String
-  quantity     Int
-  amount       Float
-
-  saleReturn   SaleReturn @relation(fields: [saleReturnId], references: [id], onDelete: Cascade)
-  saleItem     SaleItem   @relation(fields: [saleItemId], references: [id])
-
-  @@unique([saleReturnId, saleItemId])
 }

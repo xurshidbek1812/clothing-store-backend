@@ -8,8 +8,8 @@ import {
 } from '../controllers/cashboxes.controller.js';
 import {
   verifyToken,
-  requireRole,
   resolveStoreAccess,
+  isDirector,
 } from '../middleware/auth.middleware.js';
 
 const router = express.Router();
@@ -20,8 +20,8 @@ router.use(resolveStoreAccess);
 router.get('/', getCashboxes);
 router.get('/:cashboxId/transactions', getCashboxTransactions);
 
-router.post('/', requireRole(['DIRECTOR']), createCashbox);
-router.post('/expense', requireRole(['DIRECTOR']), createExpenseFromCashbox);
-router.post('/transfer', requireRole(['DIRECTOR']), transferBetweenCashboxes);
+router.post('/', isDirector, createCashbox);
+router.post('/expense', isDirector, createExpenseFromCashbox);
+router.post('/transfer', isDirector, transferBetweenCashboxes);
 
 export default router;

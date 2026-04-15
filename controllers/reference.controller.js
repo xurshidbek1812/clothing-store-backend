@@ -3,46 +3,43 @@ import { prisma } from '../lib/prisma.js';
 
 const { Prisma } = pkg;
 
-// ==================== CATEGORIES ====================
+// ==================== CATEGORY ====================
 
 export const getCategories = async (req, res) => {
   try {
-    const storeId = req.storeId;
-
     const categories = await prisma.category.findMany({
-      where: { storeId },
-      orderBy: { createdAt: 'desc' },
+      where: {
+        storeId: req.storeId,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
     });
 
     return res.json(categories);
   } catch (error) {
     console.error('getCategories error:', error);
-    return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
-    });
+    return res.status(500).json({ message: "Server xatosi" });
   }
 };
 
 export const createCategory = async (req, res) => {
   try {
-    const storeId = req.storeId;
     const { name } = req.body;
 
     if (!name || !String(name).trim()) {
-      return res.status(400).json({
-        message: "name majburiy",
-      });
+      return res.status(400).json({ message: "name majburiy" });
     }
 
     const category = await prisma.category.create({
       data: {
-        storeId,
+        storeId: req.storeId,
         name: String(name).trim(),
       },
     });
 
     return res.status(201).json({
-      message: "Kategoriya muvaffaqiyatli yaratildi",
+      message: "Kategoriya yaratildi",
       category,
     });
   } catch (error) {
@@ -53,39 +50,28 @@ export const createCategory = async (req, res) => {
       error.code === 'P2002'
     ) {
       return res.status(400).json({
-        message: "Bu nomdagi kategoriya shu do'konda allaqachon mavjud",
+        message: "Bu kategoriya allaqachon mavjud",
       });
     }
 
-    return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
-    });
+    return res.status(500).json({ message: "Server xatosi" });
   }
 };
 
 export const updateCategory = async (req, res) => {
   try {
-    const storeId = req.storeId;
     const { categoryId } = req.params;
     const { name } = req.body;
-
-    if (!name || !String(name).trim()) {
-      return res.status(400).json({
-        message: "name majburiy",
-      });
-    }
 
     const existing = await prisma.category.findFirst({
       where: {
         id: categoryId,
-        storeId,
+        storeId: req.storeId,
       },
     });
 
     if (!existing) {
-      return res.status(404).json({
-        message: "Kategoriya topilmadi",
-      });
+      return res.status(404).json({ message: "Kategoriya topilmadi" });
     }
 
     const category = await prisma.category.update({
@@ -101,62 +87,47 @@ export const updateCategory = async (req, res) => {
     });
   } catch (error) {
     console.error('updateCategory error:', error);
-
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === 'P2002'
-    ) {
-      return res.status(400).json({
-        message: "Bu nomdagi kategoriya shu do'konda allaqachon mavjud",
-      });
-    }
-
-    return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
-    });
+    return res.status(500).json({ message: "Server xatosi" });
   }
 };
 
-// ==================== EXPENSE CATEGORIES ====================
+// ==================== EXPENSE CATEGORY ====================
 
 export const getExpenseCategories = async (req, res) => {
   try {
-    const storeId = req.storeId;
-
-    const categories = await prisma.expenseCategory.findMany({
-      where: { storeId },
-      orderBy: { createdAt: 'desc' },
+    const expenseCategories = await prisma.expenseCategory.findMany({
+      where: {
+        storeId: req.storeId,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
     });
 
-    return res.json(categories);
+    return res.json(expenseCategories);
   } catch (error) {
     console.error('getExpenseCategories error:', error);
-    return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
-    });
+    return res.status(500).json({ message: "Server xatosi" });
   }
 };
 
 export const createExpenseCategory = async (req, res) => {
   try {
-    const storeId = req.storeId;
     const { name } = req.body;
 
     if (!name || !String(name).trim()) {
-      return res.status(400).json({
-        message: "name majburiy",
-      });
+      return res.status(400).json({ message: "name majburiy" });
     }
 
     const expenseCategory = await prisma.expenseCategory.create({
       data: {
-        storeId,
+        storeId: req.storeId,
         name: String(name).trim(),
       },
     });
 
     return res.status(201).json({
-      message: "Xarajat moddasi muvaffaqiyatli yaratildi",
+      message: "Xarajat moddasi yaratildi",
       expenseCategory,
     });
   } catch (error) {
@@ -167,39 +138,28 @@ export const createExpenseCategory = async (req, res) => {
       error.code === 'P2002'
     ) {
       return res.status(400).json({
-        message: "Bu nomdagi xarajat moddasi shu do'konda allaqachon mavjud",
+        message: "Bu xarajat moddasi allaqachon mavjud",
       });
     }
 
-    return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
-    });
+    return res.status(500).json({ message: "Server xatosi" });
   }
 };
 
 export const updateExpenseCategory = async (req, res) => {
   try {
-    const storeId = req.storeId;
     const { expenseCategoryId } = req.params;
     const { name } = req.body;
-
-    if (!name || !String(name).trim()) {
-      return res.status(400).json({
-        message: "name majburiy",
-      });
-    }
 
     const existing = await prisma.expenseCategory.findFirst({
       where: {
         id: expenseCategoryId,
-        storeId,
+        storeId: req.storeId,
       },
     });
 
     if (!existing) {
-      return res.status(404).json({
-        message: "Xarajat moddasi topilmadi",
-      });
+      return res.status(404).json({ message: "Xarajat moddasi topilmadi" });
     }
 
     const expenseCategory = await prisma.expenseCategory.update({
@@ -215,36 +175,24 @@ export const updateExpenseCategory = async (req, res) => {
     });
   } catch (error) {
     console.error('updateExpenseCategory error:', error);
-
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === 'P2002'
-    ) {
-      return res.status(400).json({
-        message: "Bu nomdagi xarajat moddasi shu do'konda allaqachon mavjud",
-      });
-    }
-
-    return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
-    });
+    return res.status(500).json({ message: "Server xatosi" });
   }
 };
 
-// ==================== SIZES ====================
+// ==================== SIZE ====================
 
 export const getSizes = async (req, res) => {
   try {
     const sizes = await prisma.size.findMany({
-      orderBy: { createdAt: 'desc' },
+      orderBy: {
+        createdAt: 'desc',
+      },
     });
 
     return res.json(sizes);
   } catch (error) {
     console.error('getSizes error:', error);
-    return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
-    });
+    return res.status(500).json({ message: "Server xatosi" });
   }
 };
 
@@ -253,9 +201,7 @@ export const createSize = async (req, res) => {
     const { name } = req.body;
 
     if (!name || !String(name).trim()) {
-      return res.status(400).json({
-        message: "name majburiy",
-      });
+      return res.status(400).json({ message: "name majburiy" });
     }
 
     const size = await prisma.size.create({
@@ -265,7 +211,7 @@ export const createSize = async (req, res) => {
     });
 
     return res.status(201).json({
-      message: "Razmer muvaffaqiyatli yaratildi",
+      message: "Razmer yaratildi",
       size,
     });
   } catch (error) {
@@ -280,9 +226,7 @@ export const createSize = async (req, res) => {
       });
     }
 
-    return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
-    });
+    return res.status(500).json({ message: "Server xatosi" });
   }
 };
 
@@ -291,20 +235,12 @@ export const updateSize = async (req, res) => {
     const { sizeId } = req.params;
     const { name } = req.body;
 
-    if (!name || !String(name).trim()) {
-      return res.status(400).json({
-        message: "name majburiy",
-      });
-    }
-
     const existing = await prisma.size.findUnique({
       where: { id: sizeId },
     });
 
     if (!existing) {
-      return res.status(404).json({
-        message: "Razmer topilmadi",
-      });
+      return res.status(404).json({ message: "Razmer topilmadi" });
     }
 
     const size = await prisma.size.update({
@@ -320,36 +256,24 @@ export const updateSize = async (req, res) => {
     });
   } catch (error) {
     console.error('updateSize error:', error);
-
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === 'P2002'
-    ) {
-      return res.status(400).json({
-        message: "Bu razmer allaqachon mavjud",
-      });
-    }
-
-    return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
-    });
+    return res.status(500).json({ message: "Server xatosi" });
   }
 };
 
-// ==================== CURRENCIES ====================
+// ==================== CURRENCY ====================
 
 export const getCurrencies = async (req, res) => {
   try {
     const currencies = await prisma.currency.findMany({
-      orderBy: { createdAt: 'desc' },
+      orderBy: {
+        createdAt: 'desc',
+      },
     });
 
     return res.json(currencies);
   } catch (error) {
     console.error('getCurrencies error:', error);
-    return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
-    });
+    return res.status(500).json({ message: "Server xatosi" });
   }
 };
 
@@ -374,9 +298,7 @@ export const createCurrency = async (req, res) => {
     const currency = await prisma.$transaction(async (tx) => {
       if (Boolean(isDefault)) {
         await tx.currency.updateMany({
-          data: {
-            isDefault: false,
-          },
+          data: { isDefault: false },
         });
       }
 
@@ -392,7 +314,7 @@ export const createCurrency = async (req, res) => {
     });
 
     return res.status(201).json({
-      message: "Valyuta muvaffaqiyatli yaratildi",
+      message: "Valyuta yaratildi",
       currency,
     });
   } catch (error) {
@@ -403,13 +325,11 @@ export const createCurrency = async (req, res) => {
       error.code === 'P2002'
     ) {
       return res.status(400).json({
-        message: "Bu code bilan valyuta allaqachon mavjud",
+        message: "Bu code bilan valyuta mavjud",
       });
     }
 
-    return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
-    });
+    return res.status(500).json({ message: "Server xatosi" });
   }
 };
 
@@ -423,9 +343,7 @@ export const updateCurrency = async (req, res) => {
     });
 
     if (!existing) {
-      return res.status(404).json({
-        message: "Valyuta topilmadi",
-      });
+      return res.status(404).json({ message: "Valyuta topilmadi" });
     }
 
     const data = {};
@@ -449,9 +367,7 @@ export const updateCurrency = async (req, res) => {
     const currency = await prisma.$transaction(async (tx) => {
       if (isDefault !== undefined && Boolean(isDefault)) {
         await tx.currency.updateMany({
-          data: {
-            isDefault: false,
-          },
+          data: { isDefault: false },
         });
       }
 
@@ -470,18 +386,6 @@ export const updateCurrency = async (req, res) => {
     });
   } catch (error) {
     console.error('updateCurrency error:', error);
-
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === 'P2002'
-    ) {
-      return res.status(400).json({
-        message: "Bu code bilan valyuta allaqachon mavjud",
-      });
-    }
-
-    return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
-    });
+    return res.status(500).json({ message: "Server xatosi" });
   }
 };

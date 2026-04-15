@@ -1,348 +1,440 @@
 import pkg from '@prisma/client';
-
-const { SaleType, CashTransactionType, StockMovementType} = pkg;
-
 import { prisma } from '../lib/prisma.js';
 
-export const createSale = async (req, res) => {
+const { SaleType, StockMovementType, CashTransactionType } = pkg;
+
+const roundMoney = (value) => {
+  return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+};
+
+export const searchSellableProducts = async (req, res) => {
   try {
-    const storeId = req.storeId;
-    const {
-      cashboxId,
-      type = 'CASH',
-      customerName,
-      customerPhone,
-      note,
-      items,
-      paidAmount,
-    } = req.body;
+    const q = String(req.query.q || '').trim();
+    const warehouseId = String(req.query.warehouseId || '').trim();
+    const limit = Math.min(Math.max(Number(req.query.limit || 20), 1), 50);
 
-    if (!cashboxId || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({
-        message: "cashboxId va items majburiy",
-      });
+    if (!q || !warehouseId) {
+      return res.json([]);
     }
 
-    if (!['CASH', 'CREDIT'].includes(type)) {
-      return res.status(400).json({
-        message: "type faqat CASH yoki CREDIT bo'lishi mumkin",
-      });
-    }
-
-    const cashbox = await prisma.cashbox.findFirst({
+    const products = await prisma.product.findMany({
       where: {
-        id: cashboxId,
-        storeId,
+        storeId: req.storeId,
         isActive: true,
+        OR: [
+          { name: { contains: q, mode: 'insensitive' } },
+          { brand: { contains: q, mode: 'insensitive' } },
+          {
+            variants: {
+              some: {
+                barcode: { contains: q, mode: 'insensitive' },
+              },
+            },
+          },
+          {
+            variants: {
+              some: {
+                size: {
+                  name: { contains: q, mode: 'insensitive' },
+                },
+              },
+            },
+          },
+        ],
       },
-      include: {
-        currency: true,
-      },
-    });
-
-    if (!cashbox) {
-      return res.status(404).json({
-        message: "Kassa topilmadi",
-      });
-    }
-
-    const normalizedItems = items.map((item) => ({
-      productVariantId: item.productVariantId,
-      batchId: item.batchId,
-      quantity: Number(item.quantity),
-      price: Number(item.price),
-    }));
-
-    for (const item of normalizedItems) {
-      if (!item.productVariantId || !item.batchId || !item.quantity || item.price == null) {
-        return res.status(400).json({
-          message: "Har bir item uchun productVariantId, batchId, quantity va price majburiy",
-        });
-      }
-
-      if (
-        Number.isNaN(item.quantity) ||
-        Number.isNaN(item.price) ||
-        item.quantity <= 0 ||
-        item.price < 0
-      ) {
-        return res.status(400).json({
-          message: "quantity musbat son bo'lishi, price esa to'g'ri son bo'lishi kerak",
-        });
-      }
-    }
-
-    const batchIds = [...new Set(normalizedItems.map((item) => item.batchId))];
-
-    const batches = await prisma.stockBatch.findMany({
-      where: {
-        id: { in: batchIds },
-        remainingQuantity: { gt: 0 },
-        warehouse: {
-          storeId,
-          isActive: true,
-        },
-      },
-      include: {
-        warehouse: true,
-        supplier: true,
-        productVariant: {
-          include: {
-            size: true,
-            product: true,
+      select: {
+        id: true,
+        name: true,
+        brand: true,
+        imageUrl: true,
+        variants: {
+          where: {
+            stockBatches: {
+              some: {
+                remainingQuantity: { gt: 0 },
+                warehouseId,
+                warehouse: {
+                  storeId: req.storeId,
+                  isActive: true,
+                },
+              },
+            },
+          },
+          select: {
+            id: true,
+            barcode: true,
+            size: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+            stockBatches: {
+              where: {
+                remainingQuantity: { gt: 0 },
+                warehouseId,
+                warehouse: {
+                  storeId: req.storeId,
+                  isActive: true,
+                },
+              },
+              select: {
+                id: true,
+                sellPrice: true,
+                remainingQuantity: true,
+                createdAt: true,
+                warehouse: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
+              },
+              orderBy: {
+                createdAt: 'desc',
+              },
+            },
           },
         },
       },
+      take: limit,
+      orderBy: {
+        name: 'asc',
+      },
     });
 
-    const batchMap = new Map();
-    for (const batch of batches) {
-      batchMap.set(batch.id, batch);
+    const result = products
+      .map((product) => ({
+        ...product,
+        variants: (product.variants || [])
+          .map((variant) => ({
+            ...variant,
+            totalStock: (variant.stockBatches || []).reduce(
+              (sum, batch) => sum + Number(batch.remainingQuantity || 0),
+              0
+            ),
+          }))
+          .filter((variant) => variant.totalStock > 0),
+      }))
+      .filter((product) => product.variants.length > 0);
+
+    return res.json(result);
+  } catch (error) {
+    console.error('searchSellableProducts error:', error);
+    return res.status(500).json({
+      message: 'Server xatosi',
+    });
+  }
+};
+
+export const createCashSale = async (req, res) => {
+  try {
+    const {
+      note,
+      totalDiscount = 0,
+      payments = [],
+      items,
+    } = req.body;
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({
+        message: 'items majburiy',
+      });
     }
 
-    for (const item of normalizedItems) {
-      const batch = batchMap.get(item.batchId);
+    if (!Array.isArray(payments) || payments.length === 0) {
+      return res.status(400).json({
+        message: 'payments majburiy',
+      });
+    }
+
+    const normalizedPayments = [];
+    let paidAmount = 0;
+
+    for (const payment of payments) {
+      const amount = roundMoney(Number(payment.amount || 0));
+
+      if (!payment.cashboxId || amount <= 0) {
+        return res.status(400).json({
+          message: "Har bir to'lov uchun cashboxId va amount to'g'ri bo'lishi kerak",
+        });
+      }
+
+      const cashbox = await prisma.cashbox.findFirst({
+        where: {
+          id: payment.cashboxId,
+          storeId: req.storeId,
+          isActive: true,
+        },
+      });
+
+      if (!cashbox) {
+        return res.status(404).json({
+          message: 'Tanlangan kassalardan biri topilmadi',
+        });
+      }
+
+      normalizedPayments.push({
+        cashboxId: cashbox.id,
+        currencyId: cashbox.currencyId,
+        amount,
+      });
+
+      paidAmount = roundMoney(paidAmount + amount);
+    }
+
+    const normalizedItems = [];
+
+    for (const item of items) {
+      const quantity = Number(item.quantity);
+      const unitPrice = Number(item.unitPrice ?? item.price);
+      const itemDiscount = Number(item.discountAmount || 0);
+
+      if (
+        !item.productVariantId ||
+        !item.batchId ||
+        Number.isNaN(quantity) ||
+        Number.isNaN(unitPrice) ||
+        Number.isNaN(itemDiscount) ||
+        quantity <= 0 ||
+        unitPrice < 0 ||
+        itemDiscount < 0
+      ) {
+        return res.status(400).json({
+          message:
+            "Har bir item uchun productVariantId, batchId, quantity, unitPrice to'g'ri bo'lishi kerak",
+        });
+      }
+
+      const batch = await prisma.stockBatch.findFirst({
+        where: {
+          id: item.batchId,
+          productVariantId: item.productVariantId,
+          remainingQuantity: { gt: 0 },
+          warehouse: {
+            storeId: req.storeId,
+            isActive: true,
+          },
+        },
+        include: {
+          warehouse: true,
+          productVariant: {
+            include: {
+              size: true,
+              product: true,
+            },
+          },
+        },
+      });
 
       if (!batch) {
         return res.status(404).json({
-          message: `Batch topilmadi yoki qoldig'i tugagan: ${item.batchId}`,
+          message: `Batch topilmadi yoki qoldiq yo'q: ${item.batchId}`,
         });
       }
 
-      if (batch.productVariantId !== item.productVariantId) {
+      if (batch.remainingQuantity < quantity) {
         return res.status(400).json({
-          message: "batchId va productVariantId bir-biriga mos emas",
+          message: `${batch.productVariant.product.name} (${batch.productVariant.size?.name || '-'}) uchun yetarli qoldiq yo'q`,
         });
       }
 
-      if (batch.remainingQuantity < item.quantity) {
+      const lineSubtotal = roundMoney(quantity * unitPrice);
+
+      if (itemDiscount > lineSubtotal) {
         return res.status(400).json({
-          message: `${batch.productVariant.product.name} (${batch.productVariant.size.name}) uchun tanlangan batchda qoldiq yetarli emas`,
+          message: `${batch.productVariant.product.name} uchun chegirma item summasidan katta bo'lishi mumkin emas`,
         });
       }
+
+      normalizedItems.push({
+        productVariantId: item.productVariantId,
+        batchId: item.batchId,
+        quantity,
+        unitPrice,
+        itemDiscount,
+        warehouseId: batch.warehouseId,
+      });
     }
 
-    const totalAmount = normalizedItems.reduce(
-      (sum, item) => sum + item.quantity * item.price,
-      0
+    const parsedTotalDiscount = roundMoney(Number(totalDiscount || 0));
+    if (Number.isNaN(parsedTotalDiscount) || parsedTotalDiscount < 0) {
+      return res.status(400).json({
+        message: "Umumiy chegirma noto'g'ri",
+      });
+    }
+
+    const subtotalAmount = roundMoney(
+      normalizedItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
     );
 
-    let finalPaidAmount = 0;
+    const itemLevelDiscount = roundMoney(
+      normalizedItems.reduce((sum, item) => sum + item.itemDiscount, 0)
+    );
 
-    if (type === 'CASH') {
-      finalPaidAmount = totalAmount;
-    } else {
-      finalPaidAmount = paidAmount == null ? 0 : Number(paidAmount);
+    const remainingDiscountBase = roundMoney(subtotalAmount - itemLevelDiscount);
 
-      if (Number.isNaN(finalPaidAmount) || finalPaidAmount < 0) {
-        return res.status(400).json({
-          message: "paidAmount noto'g'ri",
-        });
-      }
-
-      if (finalPaidAmount > totalAmount) {
-        return res.status(400).json({
-          message: "paidAmount totalAmount dan katta bo'lishi mumkin emas",
-        });
-      }
+    if (parsedTotalDiscount > remainingDiscountBase) {
+      return res.status(400).json({
+        message: "Umumiy chegirma qolgan summadan katta bo'lishi mumkin emas",
+      });
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      const sale = await tx.sale.create({
-        data: {
-          storeId,
-          cashboxId,
-          sellerId: req.user.id,
-          type: type === 'CASH' ? SaleType.CASH : SaleType.CREDIT,
-          totalAmount,
-          paidAmount: finalPaidAmount,
-          customerName: type === 'CREDIT' ? customerName || null : null,
-          customerPhone: type === 'CREDIT' ? customerPhone || null : null,
-          note: note || null,
-        },
+    const itemsWithDistributedDiscount = normalizedItems.map((item) => {
+      const lineSubtotal = roundMoney(item.quantity * item.unitPrice);
+
+      return {
+        ...item,
+        lineSubtotal,
+        distributedTotalDiscount: 0,
+        totalLineDiscount: item.itemDiscount,
+        finalLineTotal: lineSubtotal,
+      };
+    });
+
+    if (parsedTotalDiscount > 0) {
+      let distributed = 0;
+
+      itemsWithDistributedDiscount.forEach((item, index) => {
+        if (index === itemsWithDistributedDiscount.length - 1) {
+          const rest = roundMoney(parsedTotalDiscount - distributed);
+          item.distributedTotalDiscount = rest;
+          item.totalLineDiscount = roundMoney(item.itemDiscount + rest);
+          item.finalLineTotal = roundMoney(item.lineSubtotal - item.totalLineDiscount);
+          return;
+        }
+
+        const remainingLineBase = roundMoney(item.lineSubtotal - item.itemDiscount);
+        const share =
+          remainingDiscountBase > 0
+            ? roundMoney((remainingLineBase / remainingDiscountBase) * parsedTotalDiscount)
+            : 0;
+
+        item.distributedTotalDiscount = share;
+        item.totalLineDiscount = roundMoney(item.itemDiscount + share);
+        item.finalLineTotal = roundMoney(item.lineSubtotal - item.totalLineDiscount);
+
+        distributed = roundMoney(distributed + share);
       });
+    } else {
+      itemsWithDistributedDiscount.forEach((item) => {
+        item.finalLineTotal = roundMoney(item.lineSubtotal - item.totalLineDiscount);
+      });
+    }
 
-      for (const item of normalizedItems) {
-        const batch = batchMap.get(item.batchId);
+    const discountAmount = roundMoney(
+      itemsWithDistributedDiscount.reduce((sum, item) => sum + item.totalLineDiscount, 0)
+    );
 
-        await tx.stockBatch.update({
-          where: { id: item.batchId },
+    const totalAmount = roundMoney(
+      itemsWithDistributedDiscount.reduce((sum, item) => sum + item.finalLineTotal, 0)
+    );
+
+    if (roundMoney(paidAmount) !== roundMoney(totalAmount)) {
+      return res.status(400).json({
+        message: "To'lov summasi yakuniy summaga teng bo'lishi kerak",
+      });
+    }
+
+    const txResult = await prisma.$transaction(
+      async (tx) => {
+        const primaryCashboxId = normalizedPayments[0].cashboxId;
+
+        const sale = await tx.sale.create({
           data: {
-            remainingQuantity: {
-              decrement: item.quantity,
+            storeId: req.storeId,
+            cashboxId: primaryCashboxId,
+            sellerId: req.user.id,
+            type: SaleType.CASH,
+            subtotalAmount,
+            discountAmount,
+            totalAmount,
+            paidAmount,
+            note: note ? String(note).trim() : null,
+          },
+          select: {
+            id: true,
+          },
+        });
+
+        for (const item of itemsWithDistributedDiscount) {
+          await tx.saleItem.create({
+            data: {
+              saleId: sale.id,
+              productVariantId: item.productVariantId,
+              batchId: item.batchId,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              discountAmount: item.totalLineDiscount,
+              totalPrice: item.finalLineTotal,
             },
-          },
-        });
+          });
 
-        await tx.saleItem.create({
-          data: {
-            saleId: sale.id,
-            productVariantId: item.productVariantId,
-            batchId: item.batchId,
-            quantity: item.quantity,
-            price: item.price,
-          },
-        });
-
-        await tx.stockMovement.create({
-          data: {
-            storeId,
-            warehouseId: batch.warehouseId,
-            productVariantId: item.productVariantId,
-            batchId: item.batchId,
-            createdById: req.user.id,
-            type: StockMovementType.SALE_OUT,
-            quantity: item.quantity,
-            note: `Savdo #${sale.id}`,
-          },
-        });
-      }
-
-      if (finalPaidAmount > 0) {
-        await tx.cashbox.update({
-          where: { id: cashboxId },
-          data: {
-            balance: {
-              increment: finalPaidAmount,
-            },
-          },
-        });
-
-        await tx.cashTransaction.create({
-          data: {
-            storeId,
-            cashboxId,
-            currencyId: cashbox.currencyId,
-            createdById: req.user.id,
-            type: CashTransactionType.SALE_INCOME,
-            amount: finalPaidAmount,
-            note:
-              type === 'CREDIT'
-                ? `Nasiya savdodan to'lov #${sale.id}`
-                : `Naqd savdo #${sale.id}`,
-            relatedSaleId: sale.id,
-          },
-        });
-      }
-
-      const fullSale = await tx.sale.findUnique({
-        where: { id: sale.id },
-        include: {
-          seller: {
-            select: {
-              id: true,
-              fullName: true,
-              username: true,
-            },
-          },
-          cashbox: {
-            include: {
-              currency: true,
-            },
-          },
-          items: {
-            include: {
-              batch: {
-                include: {
-                  warehouse: true,
-                  supplier: true,
-                },
-              },
-              productVariant: {
-                include: {
-                  size: true,
-                  product: true,
-                },
+          await tx.stockBatch.update({
+            where: { id: item.batchId },
+            data: {
+              remainingQuantity: {
+                decrement: item.quantity,
               },
             },
-          },
-        },
-      });
+          });
 
-      return fullSale;
-    });
-
-    return res.status(201).json({
-      message: "Savdo muvaffaqiyatli bajarildi",
-      sale: result,
-    });
-  } catch (error) {
-    console.error("createSale error:", error);
-    return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
-    });
-  }
-};
-
-export const getSales = async (req, res) => {
-  try {
-    const storeId = req.storeId;
-    const page = Number(req.query.page) || 1;
-    const limit = Number(req.query.limit) || 20;
-    const type = req.query.type ? String(req.query.type) : null;
-    const skip = (page - 1) * limit;
-
-    const where = {
-      storeId,
-      ...(type && ['CASH', 'CREDIT'].includes(type) ? { type } : {}),
-    };
-
-    const [sales, totalItems] = await Promise.all([
-      prisma.sale.findMany({
-        where,
-        include: {
-          seller: {
-            select: {
-              id: true,
-              fullName: true,
-              username: true,
+          await tx.stockMovement.create({
+            data: {
+              storeId: req.storeId,
+              warehouseId: item.warehouseId,
+              productVariantId: item.productVariantId,
+              batchId: item.batchId,
+              createdById: req.user.id,
+              type: StockMovementType.SALE_OUT,
+              quantity: item.quantity,
+              note: 'Naqd savdo',
             },
-          },
-          cashbox: {
-            include: {
-              currency: true,
+          });
+        }
+
+        for (const payment of normalizedPayments) {
+          await tx.cashbox.update({
+            where: { id: payment.cashboxId },
+            data: {
+              balance: {
+                increment: payment.amount,
+              },
             },
-          },
-          _count: {
-            select: {
-              items: true,
+          });
+
+          await tx.cashTransaction.create({
+            data: {
+              storeId: req.storeId,
+              cashboxId: payment.cashboxId,
+              currencyId: payment.currencyId,
+              createdById: req.user.id,
+              type: CashTransactionType.SALE_INCOME,
+              amount: payment.amount,
+              note: note ? String(note).trim() : 'Naqd savdo',
+              relatedSaleId: sale.id,
             },
-          },
-        },
-        orderBy: {
-          createdAt: 'desc',
-        },
-        skip,
-        take: limit,
-      }),
-      prisma.sale.count({ where }),
-    ]);
+          });
+        }
 
-    return res.json({
-      sales,
-      totalPages: Math.ceil(totalItems / limit),
-      currentPage: page,
-      totalItems,
-    });
-  } catch (error) {
-    console.error("getSales error:", error);
-    return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
-    });
-  }
-};
-
-export const getSaleById = async (req, res) => {
-  try {
-    const storeId = req.storeId;
-    const { saleId } = req.params;
-
-    const sale = await prisma.sale.findFirst({
-      where: {
-        id: saleId,
-        storeId,
+        return {
+          saleId: sale.id,
+        };
       },
+      {
+        timeout: 15000,
+        maxWait: 10000,
+      }
+    );
+
+    const sale = await prisma.sale.findUnique({
+      where: { id: txResult.saleId },
       include: {
+        cashbox: {
+          include: {
+            currency: true,
+          },
+        },
         seller: {
           select: {
             id: true,
@@ -350,46 +442,30 @@ export const getSaleById = async (req, res) => {
             username: true,
           },
         },
-        cashbox: {
-          include: {
-            currency: true,
-          },
-        },
         items: {
           include: {
-            batch: {
-              include: {
-                warehouse: true,
-                supplier: true,
-              },
-            },
             productVariant: {
               include: {
                 size: true,
-                product: {
-                  include: {
-                    category: true,
-                  },
-                },
+                product: true,
+              },
+            },
+            batch: {
+              include: {
+                warehouse: true,
               },
             },
           },
         },
-        returns: true,
       },
     });
 
-    if (!sale) {
-      return res.status(404).json({
-        message: "Savdo topilmadi",
-      });
-    }
-
-    return res.json(sale);
-  } catch (error) {
-    console.error("getSaleById error:", error);
-    return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
+    return res.status(201).json({
+      message: 'Naqd savdo muvaffaqiyatli bajarildi',
+      sale,
     });
+  } catch (error) {
+    console.error('createCashSale error:', error);
+    return res.status(500).json({ message: 'Server xatosi' });
   }
 };

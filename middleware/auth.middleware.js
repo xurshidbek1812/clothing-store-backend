@@ -1,9 +1,7 @@
 import jwt from 'jsonwebtoken';
-import { PrismaClient, Role } from '@prisma/client';
+import { prisma } from '../lib/prisma.js';
 
-const prisma = new PrismaClient();
-
-export const verifyToken = (req, res, next) => {
+export const verifyToken = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
 
@@ -14,66 +12,117 @@ export const verifyToken = (req, res, next) => {
     }
 
     const token = authHeader.split(' ')[1];
+
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    req.user = decoded;
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.id },
+      include: {
+        userStores: {
+          include: {
+            store: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      return res.status(401).json({
+        message: "Foydalanuvchi topilmadi",
+      });
+    }
+
+    if (!user.isActive) {
+      return res.status(403).json({
+        message: "Foydalanuvchi nofaol",
+      });
+    }
+
+    req.user = {
+      id: user.id,
+      fullName: user.fullName,
+      username: user.username,
+      role: user.role,
+      stores: user.userStores.map((item) => item.store),
+    };
+
     next();
   } catch (error) {
-    return res.status(403).json({
-      message: "Yaroqsiz yoki muddati o'tgan token",
+    console.error('verifyToken error:', error);
+    return res.status(401).json({
+      message: "Noto'g'ri yoki eskirgan token",
     });
   }
 };
 
-export const requireRole = (roles) => {
-  return (req, res, next) => {
-    if (!req.user || !roles.includes(req.user.role)) {
-      return res.status(403).json({
-        message: "Bu amalni bajarish uchun ruxsat yo'q",
+export const resolveStoreAccess = async (req, res, next) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({
+        message: "Foydalanuvchi aniqlanmadi",
       });
     }
+
+    const headerStoreId = req.headers['x-store-id'];
+
+    if (!headerStoreId) {
+      return res.status(400).json({
+        message: "Store tanlanmagan",
+      });
+    }
+
+    const storeId = String(headerStoreId);
+
+    const hasAccess =
+      req.user.role === 'DIRECTOR' ||
+      (req.user.stores || []).some((store) => store.id === storeId);
+
+    if (!hasAccess) {
+      return res.status(403).json({
+        message: "Sizda bu do'konga ruxsat yo'q",
+      });
+    }
+
+    req.storeId = storeId;
+    next();
+  } catch (error) {
+    console.error('resolveStoreAccess error:', error);
+    return res.status(500).json({
+      message: "Store access tekshirishda xatolik",
+    });
+  }
+};
+
+export const requireRole = (roles = []) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({
+        message: "Foydalanuvchi aniqlanmadi",
+      });
+    }
+
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({
+        message: "Sizda bu amal uchun ruxsat yo'q",
+      });
+    }
+
     next();
   };
 };
 
 export const isDirector = (req, res, next) => {
-  if (!req.user || req.user.role !== Role.DIRECTOR) {
+  if (!req.user) {
+    return res.status(401).json({
+      message: "Foydalanuvchi aniqlanmadi",
+    });
+  }
+
+  if (req.user.role !== 'DIRECTOR') {
     return res.status(403).json({
-      message: "Bu amalni faqat direktor bajara oladi",
+      message: "Faqat direktor uchun",
     });
   }
+
   next();
-};
-
-export const resolveStoreAccess = async (req, res, next) => {
-  try {
-    const storeId = req.headers['x-store-id'] || req.params.storeId || req.body.storeId;
-
-    if (!storeId) {
-      return res.status(400).json({
-        message: "storeId yuborilishi kerak",
-      });
-    }
-
-    const link = await prisma.userStore.findFirst({
-      where: {
-        userId: req.user.id,
-        storeId: String(storeId),
-      },
-    });
-
-    if (!link) {
-      return res.status(403).json({
-        message: "Sizda bu do'kon bilan ishlash huquqi yo'q",
-      });
-    }
-
-    req.storeId = String(storeId);
-    next();
-  } catch (error) {
-    console.error("resolveStoreAccess error:", error);
-    return res.status(500).json({
-      message: "Store access tekshirishda xatolik",
-    });
-  }
 };

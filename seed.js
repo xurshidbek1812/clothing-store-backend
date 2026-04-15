@@ -1,73 +1,199 @@
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import pkg from '@prisma/client';
+
+const { PrismaClient, Role } = pkg;
 
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log("⏳ Boshlang'ich ma'lumotlar kiritilmoqda...");
+  const username = 'admin';
+  const password = '123456';
+  const passwordHash = await bcrypt.hash(password, 10);
 
-  // Baza tozalanishi kerak bo'lsa (opsional, lekin xato bermasligi uchun eski ma'lumotlarni o'chiramiz)
-  await prisma.user.deleteMany();
-  await prisma.cashbox.deleteMany();
-  await prisma.store.deleteMany();
-  await prisma.currency.deleteMany();
-
-  // 1. Asosiy valyutani yaratamiz (YANGI QO'SHILGAN QISM)
-  const currency = await prisma.currency.create({
-    data: {
-      name: "O'zbek so'mi",
-      code: "UZS",
-      symbol: "so'm",
-      rate: 1, // Asosiy valyuta kursi doim 1 bo'ladi
-      isDefault: true
-    }
+  // 1) Store
+  const store = await prisma.store.upsert({
+    where: {
+      id: 'seed-main-store-id',
+    },
+    update: {},
+    create: {
+      id: 'seed-main-store-id',
+      name: "Asosiy do'kon",
+      address: 'Toshkent',
+      isActive: true,
+    },
   });
-  console.log("✅ Valyuta yaratildi: UZS");
 
-  // 2. Do'kon yaratamiz
-  const store = await prisma.store.create({
-    data: {
-      name: "Iphone House",
-      address: "Toshkent shahri"
-    }
+  // 2) Director user
+  const existingUser = await prisma.user.findUnique({
+    where: { username },
   });
-  console.log(`✅ Do'kon yaratildi: ${store.name}`);
 
-  // 3. Kassa yaratamiz (Endi unga valyutani ham bog'laymiz!)
-  const cashbox = await prisma.cashbox.create({
-    data: {
-      name: "Asosiy Kassa",
-      balance: 0,
+  let user;
+
+  if (existingUser) {
+    user = await prisma.user.update({
+      where: { username },
+      data: {
+        fullName: 'Super Admin',
+        passwordHash,
+        role: Role.DIRECTOR,
+        isActive: true,
+      },
+    });
+  } else {
+    user = await prisma.user.create({
+      data: {
+        fullName: 'Super Admin',
+        username,
+        passwordHash,
+        role: Role.DIRECTOR,
+        isActive: true,
+      },
+    });
+  }
+
+  // 3) User -> Store biriktirish
+  await prisma.userStore.upsert({
+    where: {
+      userId_storeId: {
+        userId: user.id,
+        storeId: store.id,
+      },
+    },
+    update: {},
+    create: {
+      userId: user.id,
       storeId: store.id,
-      currencyId: currency.id // <--- PRISMA SO'RAGAN NARSA SHU EDI
-    }
+    },
   });
-  console.log("✅ Kassa yaratildi");
 
-  // 4. Admin yaratamiz
-  const hashedPassword = await bcrypt.hash('123456', 10);
-  const admin = await prisma.user.create({
-    data: {
-      name: "Boshqaruvchi",
-      username: "admin",
-      password: hashedPassword,
-      role: "ADMIN",
-      stores: {
-        connect: { id: store.id }
-      }
-    }
+  // 4) Currencies
+  const currencies = [
+    {
+      name: "O'zbek so'mi",
+      code: 'UZS',
+      symbol: "so'm",
+      rate: 1,
+      isDefault: true,
+    },
+    {
+      name: 'US Dollar',
+      code: 'USD',
+      symbol: '$',
+      rate: 12500,
+      isDefault: false,
+    },
+  ];
+
+  for (const currency of currencies) {
+    await prisma.currency.upsert({
+      where: { code: currency.code },
+      update: {
+        name: currency.name,
+        symbol: currency.symbol,
+        rate: currency.rate,
+        isDefault: currency.isDefault,
+      },
+      create: currency,
+    });
+  }
+
+  // 5) Sizes
+  const sizes = ['S', 'M', 'L', 'XL', 'XXL', '36', '37', '38', '39', '40', '41', '42'];
+
+  for (const sizeName of sizes) {
+    await prisma.size.upsert({
+      where: { name: sizeName },
+      update: {},
+      create: { name: sizeName },
+    });
+  }
+
+  // 6) Categories
+  const categories = ['Futbolka', 'Shim', 'Kurtka', 'Koylak', 'Oyoq kiyim'];
+
+  for (const categoryName of categories) {
+    await prisma.category.upsert({
+      where: {
+        storeId_name: {
+          storeId: store.id,
+          name: categoryName,
+        },
+      },
+      update: {},
+      create: {
+        storeId: store.id,
+        name: categoryName,
+      },
+    });
+  }
+
+  // 7) Expense categories
+  const expenseCategories = ['Ijara', 'Oylik', 'Transport', 'Boshqa xarajat'];
+
+  for (const item of expenseCategories) {
+    await prisma.expenseCategory.upsert({
+      where: {
+        storeId_name: {
+          storeId: store.id,
+          name: item,
+        },
+      },
+      update: {},
+      create: {
+        storeId: store.id,
+        name: item,
+      },
+    });
+  }
+
+  // 8) Warehouse
+  await prisma.warehouse.upsert({
+    where: {
+      storeId_name: {
+        storeId: store.id,
+        name: "Asosiy ombor",
+      },
+    },
+    update: {},
+    create: {
+      storeId: store.id,
+      name: "Asosiy ombor",
+      isActive: true,
+    },
   });
-  
-  console.log("✅ Admin muvaffaqiyatli yaratildi!");
-  console.log("----------------------------------");
-  console.log("Foydalanuvchi nomi: admin");
-  console.log("Maxfiy parol: 123456");
-  console.log("----------------------------------");
+
+  // 9) Cashbox
+  const uzs = await prisma.currency.findUnique({
+    where: { code: 'UZS' },
+  });
+
+  await prisma.cashbox.upsert({
+    where: {
+      storeId_name: {
+        storeId: store.id,
+        name: "Asosiy kassa",
+      },
+    },
+    update: {},
+    create: {
+      storeId: store.id,
+      currencyId: uzs.id,
+      name: "Asosiy kassa",
+      balance: 0,
+      isActive: true,
+    },
+  });
+
+  console.log('Seed muvaffaqiyatli tugadi');
+  console.log('Login:', username);
+  console.log('Password:', password);
 }
 
 main()
   .catch((e) => {
-    console.error("❌ Xatolik yuz berdi:", e);
+    console.error('Seed error:', e);
     process.exit(1);
   })
   .finally(async () => {

@@ -3,15 +3,15 @@ import {
   getCategories,
   createCategory,
   updateCategory,
+  getExpenseCategories,
+  createExpenseCategory,
+  updateExpenseCategory,
   getSizes,
   createSize,
   updateSize,
   getCurrencies,
   createCurrency,
   updateCurrency,
-  getExpenseCategories,
-  createExpenseCategory,
-  updateExpenseCategory,
 } from '../controllers/reference.controller.js';
 import {
   verifyToken,
@@ -23,7 +23,7 @@ const router = express.Router();
 
 router.use(verifyToken);
 
-// storega bog'liq bo'lganlar
+// storega bog'liq
 router.get('/categories', resolveStoreAccess, getCategories);
 router.post('/categories', resolveStoreAccess, isDirector, createCategory);
 router.put('/categories/:categoryId', resolveStoreAccess, isDirector, updateCategory);
@@ -32,7 +32,7 @@ router.get('/expense-categories', resolveStoreAccess, getExpenseCategories);
 router.post('/expense-categories', resolveStoreAccess, isDirector, createExpenseCategory);
 router.put('/expense-categories/:expenseCategoryId', resolveStoreAccess, isDirector, updateExpenseCategory);
 
-// sizes va currencies global bo'lishi mumkin
+// global
 router.get('/sizes', getSizes);
 router.post('/sizes', isDirector, createSize);
 router.put('/sizes/:sizeId', isDirector, updateSize);

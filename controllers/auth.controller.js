@@ -1,6 +1,9 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import pkg from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
+
+const { Role } = pkg;
 
 const signToken = (user) => {
   return jwt.sign(
@@ -13,7 +16,6 @@ const signToken = (user) => {
   );
 };
 
-// Direktor + birinchi store yaratish
 export const register = async (req, res) => {
   try {
     const { fullName, username, password, storeName, storeAddress } = req.body;
@@ -25,12 +27,12 @@ export const register = async (req, res) => {
     }
 
     const existingUser = await prisma.user.findUnique({
-      where: { username },
+      where: { username: String(username).trim() },
     });
 
     if (existingUser) {
       return res.status(400).json({
-        message: "Bu username allaqachon band",
+        message: "Bu username allaqachon mavjud",
       });
     }
 
@@ -39,15 +41,15 @@ export const register = async (req, res) => {
     const result = await prisma.$transaction(async (tx) => {
       const store = await tx.store.create({
         data: {
-          name: storeName,
-          address: storeAddress || null,
+          name: String(storeName).trim(),
+          address: storeAddress ? String(storeAddress).trim() : null,
         },
       });
 
       const user = await tx.user.create({
         data: {
-          fullName,
-          username,
+          fullName: String(fullName).trim(),
+          username: String(username).trim(),
           passwordHash,
           role: Role.DIRECTOR,
         },
@@ -66,7 +68,7 @@ export const register = async (req, res) => {
     const token = signToken(result.user);
 
     return res.status(201).json({
-      message: "Direktor va do'kon muvaffaqiyatli yaratildi",
+      message: "Direktor va do'kon yaratildi",
       token,
       user: {
         id: result.user.id,
@@ -78,14 +80,15 @@ export const register = async (req, res) => {
             id: result.store.id,
             name: result.store.name,
             address: result.store.address,
+            isActive: result.store.isActive,
           },
         ],
       },
     });
   } catch (error) {
-    console.error("register error:", error);
+    console.error('register error:', error);
     return res.status(500).json({
-      message: "Serverda xatolik yuz berdi",
+      message: "Server xatosi",
     });
   }
 };
@@ -101,9 +104,15 @@ export const login = async (req, res) => {
     }
 
     const user = await prisma.user.findUnique({
-      where: { username },
+      where: {
+        username: String(username).trim(),
+      },
       include: {
-        stores: true,
+        userStores: {
+          include: {
+            store: true,
+          },
+        },
       },
     });
 
@@ -113,22 +122,13 @@ export const login = async (req, res) => {
       });
     }
 
-    if (user.isActive === false) {
+    if (!user.isActive) {
       return res.status(400).json({
         message: "Foydalanuvchi nofaol",
       });
     }
 
-    const hashedPassword = user.passwordHash || user.password;
-
-    if (!hashedPassword) {
-      console.error('User password field topilmadi:', user);
-      return res.status(500).json({
-        message: "User parol maydoni topilmadi",
-      });
-    }
-
-    const isMatch = await bcrypt.compare(password, hashedPassword);
+    const isMatch = await bcrypt.compare(password, user.passwordHash);
 
     if (!isMatch) {
       return res.status(400).json({
@@ -142,19 +142,19 @@ export const login = async (req, res) => {
       token,
       user: {
         id: user.id,
-        fullName: user.fullName || user.name || '',
+        fullName: user.fullName,
         username: user.username,
         role: user.role,
-        stores: (user.stores || []).map((store) => ({
-          id: store.id,
-          name: store.name,
-          address: store.address || null,
-          isActive: store.isActive ?? true,
+        stores: user.userStores.map((item) => ({
+          id: item.store.id,
+          name: item.store.name,
+          address: item.store.address,
+          isActive: item.store.isActive,
         })),
       },
     });
   } catch (error) {
-    console.error("login error:", error);
+    console.error('login error:', error);
     return res.status(500).json({
       message: "Server xatosi",
     });

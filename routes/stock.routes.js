@@ -3,12 +3,11 @@ import {
   stockInFromSupplier,
   getStockBalances,
   getStockMovements,
-  getAvailableBatches,
 } from '../controllers/stock.controller.js';
 import {
   verifyToken,
-  requireRole,
   resolveStoreAccess,
+  isDirector,
 } from '../middleware/auth.middleware.js';
 
 const router = express.Router();
@@ -18,8 +17,7 @@ router.use(resolveStoreAccess);
 
 router.get('/balances', getStockBalances);
 router.get('/movements', getStockMovements);
-router.get('/available-batches', getAvailableBatches);
 
-router.post('/supplier-in', requireRole(['DIRECTOR']), stockInFromSupplier);
+router.post('/supplier-in', isDirector, stockInFromSupplier);
 
 export default router;
