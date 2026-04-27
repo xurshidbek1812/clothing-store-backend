@@ -5,10 +5,13 @@ import {
   getProductById,
   updateProduct,
   addVariantToProduct,
+  reorderProductVariants,
   getAvailableBatches,
   searchProductsForSupplierIn,
   uploadProductImage,
   deleteProductImage,
+  setPrimaryProductImage,
+  removeVariantFromProduct
 } from '../controllers/products.controller.js';
 import {
   verifyToken,
@@ -30,6 +33,7 @@ router.get('/:productId', getProductById);
 router.post('/', requireRole(['DIRECTOR']), createProduct);
 router.put('/:productId', requireRole(['DIRECTOR']), updateProduct);
 router.post('/:productId/variants', requireRole(['DIRECTOR']), addVariantToProduct);
+router.patch('/:productId/variants/reorder', requireRole(['DIRECTOR']), reorderProductVariants);
 
 router.post(
   '/:productId/image',
@@ -39,9 +43,21 @@ router.post(
 );
 
 router.delete(
-  '/:productId/image',
+  '/images/:imageId',
   requireRole(['DIRECTOR']),
   deleteProductImage
+);
+
+router.patch(
+  '/images/:imageId/primary',
+  requireRole(['DIRECTOR']),
+  setPrimaryProductImage
+);
+
+router.delete(
+  '/:productId/variants/:variantId',
+  requireRole(['DIRECTOR']),
+  removeVariantFromProduct
 );
 
 export default router;

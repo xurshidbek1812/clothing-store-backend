@@ -67,6 +67,106 @@ export const createCashbox = async (req, res) => {
   }
 };
 
+export const updateCashbox = async (req, res) => {
+  try {
+    const { cashboxId } = req.params;
+    const { name, currencyId, isActive } = req.body;
+
+    const existing = await prisma.cashbox.findFirst({
+      where: {
+        id: cashboxId,
+        storeId: req.storeId,
+      },
+    });
+
+    if (!existing) {
+      return res.status(404).json({
+        message: 'Kassa topilmadi',
+      });
+    }
+
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({
+        message: 'Kassa nomi majburiy',
+      });
+    }
+
+    if (!currencyId) {
+      return res.status(400).json({
+        message: 'Valuta tanlanishi kerak',
+      });
+    }
+
+    const currency = await prisma.currency.findUnique({
+      where: { id: currencyId },
+    });
+
+    if (!currency) {
+      return res.status(404).json({
+        message: 'Valuta topilmadi',
+      });
+    }
+
+    const normalizedName = String(name).trim();
+
+    const duplicate = await prisma.cashbox.findFirst({
+      where: {
+        storeId: req.storeId,
+        name: normalizedName,
+        NOT: {
+          id: cashboxId,
+        },
+      },
+    });
+
+    if (duplicate) {
+      return res.status(400).json({
+        message: 'Bu nomdagi kassa allaqachon mavjud',
+      });
+    }
+
+    const cashbox = await prisma.cashbox.update({
+      where: { id: cashboxId },
+      data: {
+        name: normalizedName,
+        currencyId,
+        isActive: Boolean(isActive),
+      },
+      include: {
+        currency: true,
+      },
+    });
+
+    return res.json({
+      message: 'Kassa yangilandi',
+      cashbox,
+    });
+  } catch (error) {
+    console.error('updateCashbox error:', error);
+    return res.status(500).json({
+      message: 'Server xatosi',
+    });
+  }
+};
+
+export const getCurrencies = async (_req, res) => {
+  try {
+    const currencies = await prisma.currency.findMany({
+      orderBy: [
+        { isDefault: 'desc' },
+        { code: 'asc' },
+      ],
+    });
+
+    return res.json(currencies);
+  } catch (error) {
+    console.error('getCurrencies error:', error);
+    return res.status(500).json({
+      message: 'Server xatosi',
+    });
+  }
+};
+
 export const getCashboxes = async (req, res) => {
   try {
     const cashboxes = await prisma.cashbox.findMany({

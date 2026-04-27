@@ -2,11 +2,16 @@ import express from 'express';
 import {
   searchSellableProducts,
   createCashSale,
+  createCreditSale,
 } from '../controllers/sales.controller.js';
 import {
   getSalesHistory,
   getSaleById,
 } from '../controllers/salesHistory.controller.js';
+import {
+  getSaleReturns,
+  createSaleReturn,
+} from '../controllers/saleReturns.controller.js';
 import {
   verifyToken,
   resolveStoreAccess,
@@ -25,6 +30,18 @@ router.get(
 );
 
 router.get(
+  '/returns',
+  requireRole(['DIRECTOR', 'SELLER']),
+  getSaleReturns
+);
+
+router.post(
+  '/returns',
+  requireRole(['DIRECTOR', 'SELLER']),
+  createSaleReturn
+);
+
+router.get(
   '/',
   requireRole(['DIRECTOR', 'SELLER']),
   getSalesHistory
@@ -40,6 +57,12 @@ router.post(
   '/cash',
   requireRole(['DIRECTOR', 'SELLER']),
   createCashSale
+);
+
+router.post(
+  '/credit',
+  requireRole(['DIRECTOR', 'SELLER']),
+  createCreditSale
 );
 
 export default router;

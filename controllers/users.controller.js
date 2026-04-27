@@ -4,8 +4,81 @@ import { prisma } from '../lib/prisma.js';
 
 const { Role } = pkg;
 
+function isOwner(user) {
+  return user?.role === 'OWNER';
+}
+
+function isDirector(user) {
+  return user?.role === 'DIRECTOR';
+}
+
+function canManageUsers(user) {
+  return isOwner(user) || isDirector(user);
+}
+
+function normalizeStoreIds(storeIds = []) {
+  return [...new Set((storeIds || []).map(String).filter(Boolean))];
+}
+
+async function validateStores(storeIds) {
+  const normalizedStoreIds = normalizeStoreIds(storeIds);
+
+  if (!normalizedStoreIds.length) {
+    return {
+      ok: false,
+      message: "Kamida bitta do'kon biriktirilishi kerak",
+    };
+  }
+
+  const stores = await prisma.store.findMany({
+    where: {
+      id: { in: normalizedStoreIds },
+      isActive: true,
+    },
+    select: { id: true },
+  });
+
+  if (stores.length !== normalizedStoreIds.length) {
+    return {
+      ok: false,
+      message: "Store lardan biri topilmadi",
+    };
+  }
+
+  return {
+    ok: true,
+    storeIds: normalizedStoreIds,
+  };
+}
+
+function sanitizeUser(user) {
+  if (!user) return user;
+
+  const { passwordHash, ...rest } = user;
+  return rest;
+}
+
+async function getOwnerCount(tx = prisma) {
+  return tx.user.count({
+    where: {
+      role: Role.OWNER,
+    },
+  });
+}
+
+function canDirectorTouchTarget(currentUser, targetUser) {
+  if (!isDirector(currentUser)) return false;
+  return targetUser.role === Role.SELLER;
+}
+
 export const createUser = async (req, res) => {
   try {
+    if (!canManageUsers(req.user)) {
+      return res.status(403).json({
+        message: "Sizda bu amal uchun ruxsat yo'q",
+      });
+    }
+
     const {
       fullName,
       username,
@@ -20,15 +93,15 @@ export const createUser = async (req, res) => {
       });
     }
 
-    if (!['DIRECTOR', 'SELLER'].includes(role)) {
+    if (!['OWNER', 'DIRECTOR', 'SELLER'].includes(role)) {
       return res.status(400).json({
-        message: "role faqat DIRECTOR yoki SELLER bo'lishi mumkin",
+        message: "role faqat OWNER, DIRECTOR yoki SELLER bo'lishi mumkin",
       });
     }
 
-    if (!Array.isArray(storeIds) || storeIds.length === 0) {
-      return res.status(400).json({
-        message: "Kamida bitta do'kon biriktirilishi kerak",
+    if (isDirector(req.user) && role !== 'SELLER') {
+      return res.status(403).json({
+        message: 'Director faqat seller yarata oladi',
       });
     }
 
@@ -38,44 +111,46 @@ export const createUser = async (req, res) => {
 
     if (existingUser) {
       return res.status(400).json({
-        message: "Bu username allaqachon mavjud",
+        message: 'Bu username allaqachon mavjud',
       });
     }
 
-    const stores = await prisma.store.findMany({
-      where: {
-        id: { in: [...new Set(storeIds.map(String))] },
-        isActive: true,
-      },
-      select: { id: true },
-    });
-
-    if (stores.length !== [...new Set(storeIds.map(String))].length) {
-      return res.status(404).json({
-        message: "Store lardan biri topilmadi",
+    const storesValidation = await validateStores(storeIds);
+    if (!storesValidation.ok) {
+      return res.status(400).json({
+        message: storesValidation.message,
       });
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
 
     const user = await prisma.$transaction(async (tx) => {
+      if (role === 'OWNER' && !isOwner(req.user)) {
+        throw new Error("Faqat owner owner yaratishi mumkin");
+      }
+
       const createdUser = await tx.user.create({
         data: {
           fullName: String(fullName).trim(),
           username: String(username).trim(),
           passwordHash,
-          role: role === 'DIRECTOR' ? Role.DIRECTOR : Role.SELLER,
+          role:
+            role === 'OWNER'
+              ? Role.OWNER
+              : role === 'DIRECTOR'
+              ? Role.DIRECTOR
+              : Role.SELLER,
         },
       });
 
       await tx.userStore.createMany({
-        data: [...new Set(storeIds.map(String))].map((storeId) => ({
+        data: storesValidation.storeIds.map((storeId) => ({
           userId: createdUser.id,
           storeId,
         })),
       });
 
-      return tx.user.findUnique({
+      const created = await tx.user.findUnique({
         where: { id: createdUser.id },
         include: {
           userStores: {
@@ -85,23 +160,31 @@ export const createUser = async (req, res) => {
           },
         },
       });
+
+      return sanitizeUser(created);
     });
 
     return res.status(201).json({
-      message: "Xodim yaratildi",
+      message: 'Xodim yaratildi',
       user,
     });
   } catch (error) {
     console.error('createUser error:', error);
     return res.status(500).json({
-      message: "Server xatosi",
+      message: error.message || 'Server xatosi',
     });
   }
 };
 
 export const getUsers = async (req, res) => {
   try {
-    const users = await prisma.user.findMany({
+    if (!canManageUsers(req.user)) {
+      return res.status(403).json({
+        message: "Sizda bu amal uchun ruxsat yo'q",
+      });
+    }
+
+    const allUsers = await prisma.user.findMany({
       include: {
         userStores: {
           include: {
@@ -114,17 +197,31 @@ export const getUsers = async (req, res) => {
       },
     });
 
+    let users = allUsers;
+
+    if (isDirector(req.user)) {
+      users = allUsers.filter((user) => user.role === 'SELLER');
+    }
+
+    users = users.map(sanitizeUser);
+
     return res.json(users);
   } catch (error) {
     console.error('getUsers error:', error);
     return res.status(500).json({
-      message: "Server xatosi",
+      message: 'Server xatosi',
     });
   }
 };
 
 export const getUserById = async (req, res) => {
   try {
+    if (!canManageUsers(req.user)) {
+      return res.status(403).json({
+        message: "Sizda bu amal uchun ruxsat yo'q",
+      });
+    }
+
     const { userId } = req.params;
 
     const user = await prisma.user.findUnique({
@@ -140,21 +237,35 @@ export const getUserById = async (req, res) => {
 
     if (!user) {
       return res.status(404).json({
-        message: "Xodim topilmadi",
+        message: 'Xodim topilmadi',
       });
     }
 
-    return res.json(user);
+    if (isDirector(req.user)) {
+      if (!canDirectorTouchTarget(req.user, user)) {
+        return res.status(403).json({
+          message: "Director bu foydalanuvchini ko'ra olmaydi",
+        });
+      }
+    }
+
+    return res.json(sanitizeUser(user));
   } catch (error) {
     console.error('getUserById error:', error);
     return res.status(500).json({
-      message: "Server xatosi",
+      message: 'Server xatosi',
     });
   }
 };
 
 export const updateUser = async (req, res) => {
   try {
+    if (!canManageUsers(req.user)) {
+      return res.status(403).json({
+        message: "Sizda bu amal uchun ruxsat yo'q",
+      });
+    }
+
     const { userId } = req.params;
     const {
       fullName,
@@ -163,16 +274,34 @@ export const updateUser = async (req, res) => {
       role,
       isActive,
       storeIds,
+      makeOwner,
     } = req.body;
 
     const existingUser = await prisma.user.findUnique({
       where: { id: userId },
+      include: {
+        userStores: true,
+      },
     });
 
     if (!existingUser) {
       return res.status(404).json({
-        message: "Xodim topilmadi",
+        message: 'Xodim topilmadi',
       });
+    }
+
+    if (req.user.id === userId && !isOwner(req.user)) {
+      return res.status(403).json({
+        message: "O'zingizni bu page orqali tahrirlay olmaysiz",
+      });
+    }
+
+    if (isDirector(req.user)) {
+      if (!canDirectorTouchTarget(req.user, existingUser)) {
+        return res.status(403).json({
+          message: 'Director faqat sellerlarni tahrirlay oladi',
+        });
+      }
     }
 
     if (username && String(username).trim() !== existingUser.username) {
@@ -182,49 +311,105 @@ export const updateUser = async (req, res) => {
 
       if (duplicate) {
         return res.status(400).json({
-          message: "Bu username allaqachon mavjud",
+          message: 'Bu username allaqachon mavjud',
         });
       }
     }
 
-    if (role && !['DIRECTOR', 'SELLER'].includes(role)) {
+    if (role && !['OWNER', 'DIRECTOR', 'SELLER'].includes(role)) {
       return res.status(400).json({
-        message: "role faqat DIRECTOR yoki SELLER bo'lishi mumkin",
+        message: "role faqat OWNER, DIRECTOR yoki SELLER bo'lishi mumkin",
       });
     }
+
+    if (isDirector(req.user) && role && role !== 'SELLER') {
+      return res.status(403).json({
+        message: 'Director role o‘zgartira olmaydi',
+      });
+    }
+
+    let validatedStoreIds = null;
 
     if (storeIds !== undefined) {
-      if (!Array.isArray(storeIds) || storeIds.length === 0) {
+      const storesValidation = await validateStores(storeIds);
+
+      if (!storesValidation.ok) {
         return res.status(400).json({
-          message: "Kamida bitta do'kon biriktirilishi kerak",
+          message: storesValidation.message,
         });
       }
 
-      const stores = await prisma.store.findMany({
-        where: {
-          id: { in: [...new Set(storeIds.map(String))] },
-          isActive: true,
-        },
-        select: { id: true },
-      });
-
-      if (stores.length !== [...new Set(storeIds.map(String))].length) {
-        return res.status(404).json({
-          message: "Store lardan biri topilmadi",
-        });
-      }
+      validatedStoreIds = storesValidation.storeIds;
     }
 
     const updatedUser = await prisma.$transaction(async (tx) => {
       const data = {};
 
-      if (fullName !== undefined) data.fullName = String(fullName).trim();
-      if (username !== undefined) data.username = String(username).trim();
-      if (role !== undefined) data.role = role === 'DIRECTOR' ? Role.DIRECTOR : Role.SELLER;
-      if (isActive !== undefined) data.isActive = Boolean(isActive);
+      if (fullName !== undefined) {
+        const normalized = String(fullName).trim();
+        if (!normalized) {
+          throw new Error("To'liq ism majburiy");
+        }
+        data.fullName = normalized;
+      }
+
+      if (username !== undefined) {
+        const normalized = String(username).trim();
+        if (!normalized) {
+          throw new Error('Username majburiy');
+        }
+        data.username = normalized;
+      }
 
       if (password) {
         data.passwordHash = await bcrypt.hash(password, 10);
+      }
+
+      if (isActive !== undefined) {
+        data.isActive = Boolean(isActive);
+      }
+
+      if (role !== undefined) {
+        if (role === 'OWNER' && !isOwner(req.user)) {
+          throw new Error("Faqat owner owner qila oladi");
+        }
+
+        data.role =
+          role === 'OWNER'
+            ? Role.OWNER
+            : role === 'DIRECTOR'
+            ? Role.DIRECTOR
+            : Role.SELLER;
+      }
+
+      if (makeOwner === true) {
+        if (!isOwner(req.user)) {
+          throw new Error("Faqat owner ownerlikni o'tkaza oladi");
+        }
+
+        if (existingUser.role !== Role.DIRECTOR) {
+          throw new Error("Faqat directorni owner qilish mumkin");
+        }
+
+        await tx.user.update({
+          where: { id: req.user.id },
+          data: {
+            role: Role.DIRECTOR,
+          },
+        });
+
+        data.role = Role.OWNER;
+      }
+
+      if (existingUser.role === Role.OWNER && role && role !== 'OWNER') {
+        if (!isOwner(req.user)) {
+          throw new Error("Faqat owner owner rolini o'zgartira oladi");
+        }
+
+        const ownerCount = await getOwnerCount(tx);
+        if (ownerCount <= 1 && makeOwner !== true) {
+          throw new Error("Kamida bitta owner qolishi kerak");
+        }
       }
 
       await tx.user.update({
@@ -232,20 +417,20 @@ export const updateUser = async (req, res) => {
         data,
       });
 
-      if (storeIds !== undefined) {
+      if (validatedStoreIds) {
         await tx.userStore.deleteMany({
           where: { userId },
         });
 
         await tx.userStore.createMany({
-          data: [...new Set(storeIds.map(String))].map((storeId) => ({
+          data: validatedStoreIds.map((storeId) => ({
             userId,
             storeId,
           })),
         });
       }
 
-      return tx.user.findUnique({
+      const finalUser = await tx.user.findUnique({
         where: { id: userId },
         include: {
           userStores: {
@@ -255,16 +440,18 @@ export const updateUser = async (req, res) => {
           },
         },
       });
+
+      return sanitizeUser(finalUser);
     });
 
     return res.json({
-      message: "Xodim yangilandi",
+      message: 'Xodim yangilandi',
       user: updatedUser,
     });
   } catch (error) {
     console.error('updateUser error:', error);
     return res.status(500).json({
-      message: "Server xatosi",
+      message: error.message || 'Server xatosi',
     });
   }
 };

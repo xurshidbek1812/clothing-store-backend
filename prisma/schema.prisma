@@ -8,6 +8,7 @@ datasource db {
 }
 
 enum Role {
+  OWNER
   DIRECTOR
   SELLER
 }
@@ -25,6 +26,8 @@ enum CashTransactionType {
   MANUAL_IN
   MANUAL_OUT
   SALE_RETURN_OUT
+  EXCHANGE_OUT
+  EXCHANGE_IN
 }
 
 enum StockMovementType {
@@ -48,6 +51,55 @@ enum SupplierInStatus {
   REJECTED
 }
 
+enum WarehouseTransferStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum InterStoreTransferStatus {
+  PENDING
+  IN_TRANSIT
+  RECEIVED
+  REJECTED
+}
+
+enum SupplierReturnStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum CashboxTransferStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum InterStoreCashTransferStatus {
+  PENDING
+  IN_TRANSIT
+  RECEIVED
+  REJECTED
+}
+
+enum CashExchangeStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum CashExchangeRateMode {
+  MULTIPLY
+  DIVIDE
+}
+
+enum ExpenseStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 model Store {
   id        String   @id @default(uuid())
   name      String
@@ -56,22 +108,32 @@ model Store {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  userStores            UserStore[]
-  warehouses            Warehouse[]
-  cashboxes             Cashbox[]
-  categories            Category[]
-  expenseCategories     ExpenseCategory[]
-  products              Product[]
-  suppliers             Supplier[]
-  sales                 Sale[]
-  saleReturns           SaleReturn[]
-  stockMovements        StockMovement[]
-  cashTransactions      CashTransaction[]
-  expenses              Expense[]
-  inventoryCounts       InventoryCount[]
-  supplierLedgerEntries SupplierLedgerEntry[]
-  supplierPayments      SupplierPayment[]
-  supplierIns           SupplierIn[]
+  userStores                      UserStore[]
+  warehouses                      Warehouse[]
+  cashboxes                       Cashbox[]
+  categories                      Category[]
+  expenseCategories               ExpenseCategory[]
+  products                        Product[]
+  suppliers                       Supplier[]
+  customers                       Customer[]
+  sales                           Sale[]
+  creditPayments                  CreditPayment[]
+  saleReturns                     SaleReturn[]
+  stockMovements                  StockMovement[]
+  cashTransactions                CashTransaction[]
+  expenses                        Expense[]
+  inventoryCounts                 InventoryCount[]
+  supplierLedgerEntries           SupplierLedgerEntry[]
+  supplierPayments                SupplierPayment[]
+  supplierIns                     SupplierIn[]
+  warehouseTransfers              WarehouseTransfer[]
+  supplierReturns                 SupplierReturn[]
+  outgoingInterStoreCashTransfers InterStoreCashTransfer[] @relation("InterStoreCashTransferFromStore")
+  incomingInterStoreCashTransfers InterStoreCashTransfer[] @relation("InterStoreCashTransferToStore")
+  outgoingInterStoreTransfers     InterStoreTransfer[]     @relation("InterStoreTransferFromStore")
+  incomingInterStoreTransfers     InterStoreTransfer[]     @relation("InterStoreTransferToStore")
+  CashboxTransfer                 CashboxTransfer[]
+  cashExchanges                   CashExchange[]
 }
 
 model User {
@@ -84,15 +146,35 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  userStores           UserStore[]
-  sales                Sale[]
-  cashTransactions     CashTransaction[]
-  stockMovements       StockMovement[]
-  expenses             Expense[]
-  inventoryCounts      InventoryCount[]
-  supplierPayments     SupplierPayment[]
-  submittedSupplierIns SupplierIn[]      @relation("SupplierInSubmittedBy")
-  approvedSupplierIns  SupplierIn[]      @relation("SupplierInApprovedBy")
+  userStores                      UserStore[]
+  sales                           Sale[]
+  creditPayments                  CreditPayment[]
+  cashTransactions                CashTransaction[]
+  stockMovements                  StockMovement[]
+  expenses                        Expense[]
+  inventoryCounts                 InventoryCount[]
+  supplierPayments                SupplierPayment[]
+  submittedSupplierIns            SupplierIn[]             @relation("SupplierInSubmittedBy")
+  approvedSupplierIns             SupplierIn[]             @relation("SupplierInApprovedBy")
+  createdWarehouseTransfers       WarehouseTransfer[]      @relation("WarehouseTransferCreatedBy")
+  approvedWarehouseTransfers      WarehouseTransfer[]      @relation("WarehouseTransferApprovedBy")
+  submittedSupplierReturns        SupplierReturn[]         @relation("SupplierReturnSubmittedBy")
+  approvedSupplierReturns         SupplierReturn[]         @relation("SupplierReturnApprovedBy")
+  createdInterStoreTransfers      InterStoreTransfer[]     @relation("InterStoreTransferCreatedBy")
+  sentInterStoreTransfers         InterStoreTransfer[]     @relation("InterStoreTransferSentBy")
+  receivedInterStoreTransfers     InterStoreTransfer[]     @relation("InterStoreTransferReceivedBy")
+  createdCashboxTransfers         CashboxTransfer[]        @relation("CashboxTransferCreatedBy")
+  approvedCashboxTransfers        CashboxTransfer[]        @relation("CashboxTransferApprovedBy")
+  rejectedCashboxTransfers        CashboxTransfer[]        @relation("CashboxTransferRejectedBy")
+  createdInterStoreCashTransfers  InterStoreCashTransfer[] @relation("InterStoreCashTransferCreatedBy")
+  sentInterStoreCashTransfers     InterStoreCashTransfer[] @relation("InterStoreCashTransferSentBy")
+  receivedInterStoreCashTransfers InterStoreCashTransfer[] @relation("InterStoreCashTransferReceivedBy")
+  createdCashExchanges            CashExchange[]           @relation("CashExchangeCreatedBy")
+  approvedCashExchanges           CashExchange[]           @relation("CashExchangeApprovedBy")
+  rejectedCashExchanges           CashExchange[]           @relation("CashExchangeRejectedBy")
+  createdExpenses                 Expense[]                @relation("ExpenseCreatedBy")
+  approvedExpenses                Expense[]                @relation("ExpenseApprovedBy")
+  rejectedExpenses                Expense[]                @relation("ExpenseRejectedBy")
 }
 
 model UserStore {
@@ -117,8 +199,20 @@ model Currency {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  cashboxes        Cashbox[]
-  cashTransactions CashTransaction[]
+  cashboxes                    Cashbox[]
+  creditPayments               CreditPayment[]
+  cashTransactions             CashTransaction[]
+  stockBatchCostCurrencies     StockBatch[]             @relation("StockBatchCostCurrency")
+  stockBatchSellCurrencies     StockBatch[]             @relation("StockBatchSellCurrency")
+  supplierInItemCostCurrencies SupplierInItem[]         @relation("SupplierInItemCostCurrency")
+  supplierInItemSellCurrencies SupplierInItem[]         @relation("SupplierInItemSellCurrency")
+  saleItems                    SaleItem[]
+  SupplierLedgerEntry          SupplierLedgerEntry[]
+  SupplierPayment              SupplierPayment[]
+  CashboxTransfer              CashboxTransfer[]
+  interStoreCashTransfers      InterStoreCashTransfer[]
+  cashExchangesFrom            CashExchange[]           @relation("CashExchangeFromCurrency")
+  cashExchangesTo              CashExchange[]           @relation("CashExchangeToCurrency")
 }
 
 model Cashbox {
@@ -134,15 +228,92 @@ model Cashbox {
   store    Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
   currency Currency @relation(fields: [currencyId], references: [id])
 
-  sales            Sale[]
-  saleReturns      SaleReturn[]
-  cashTransactions CashTransaction[]
-  expenses         Expense[]
-  supplierPayments SupplierPayment[]
-  transferFrom     CashTransaction[] @relation("TransferFromCashbox")
-  transferTo       CashTransaction[] @relation("TransferToCashbox")
+  sales                           Sale[]
+  creditPayments                  CreditPayment[]
+  saleReturns                     SaleReturn[]
+  cashTransactions                CashTransaction[]
+  expenses                        Expense[]
+  supplierPayments                SupplierPayment[]
+  transferFrom                    CashTransaction[]        @relation("TransferFromCashbox")
+  transferTo                      CashTransaction[]        @relation("TransferToCashbox")
+  outgoingTransfers               CashboxTransfer[]        @relation("CashboxTransferFromCashbox")
+  incomingTransfers               CashboxTransfer[]        @relation("CashboxTransferToCashbox")
+  outgoingInterStoreCashTransfers InterStoreCashTransfer[] @relation("InterStoreCashTransferFromCashbox")
+  incomingInterStoreCashTransfers InterStoreCashTransfer[] @relation("InterStoreCashTransferToCashbox")
+  outgoingExchanges               CashExchange[]           @relation("CashExchangeFromCashbox")
+  incomingExchanges               CashExchange[]           @relation("CashExchangeToCashbox")
 
   @@unique([storeId, name])
+}
+
+model CashboxTransfer {
+  id            String                @id @default(uuid())
+  storeId       String
+  fromCashboxId String
+  toCashboxId   String
+  currencyId    String
+  amount        Decimal               @db.Decimal(18, 2)
+  note          String?
+  status        CashboxTransferStatus @default(PENDING)
+
+  createdById  String
+  approvedById String?
+  rejectedById String?
+
+  createdAt  DateTime  @default(now())
+  approvedAt DateTime?
+  rejectedAt DateTime?
+  updatedAt  DateTime  @updatedAt
+
+  store       Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  fromCashbox Cashbox  @relation("CashboxTransferFromCashbox", fields: [fromCashboxId], references: [id])
+  toCashbox   Cashbox  @relation("CashboxTransferToCashbox", fields: [toCashboxId], references: [id])
+  currency    Currency @relation(fields: [currencyId], references: [id])
+
+  createdBy  User  @relation("CashboxTransferCreatedBy", fields: [createdById], references: [id])
+  approvedBy User? @relation("CashboxTransferApprovedBy", fields: [approvedById], references: [id])
+  rejectedBy User? @relation("CashboxTransferRejectedBy", fields: [rejectedById], references: [id])
+
+  @@index([storeId, status, createdAt])
+  @@index([fromCashboxId])
+  @@index([toCashboxId])
+}
+
+model InterStoreCashTransfer {
+  id String @id @default(uuid())
+
+  fromStoreId   String
+  toStoreId     String
+  fromCashboxId String
+  toCashboxId   String
+  currencyId    String
+  amount        Decimal                      @db.Decimal(18, 2)
+  note          String?
+  status        InterStoreCashTransferStatus @default(PENDING)
+
+  createdById  String
+  sentById     String?
+  receivedById String?
+
+  createdAt  DateTime  @default(now())
+  sentAt     DateTime?
+  receivedAt DateTime?
+  updatedAt  DateTime  @updatedAt
+
+  fromStore   Store    @relation("InterStoreCashTransferFromStore", fields: [fromStoreId], references: [id], onDelete: Cascade)
+  toStore     Store    @relation("InterStoreCashTransferToStore", fields: [toStoreId], references: [id], onDelete: Cascade)
+  fromCashbox Cashbox  @relation("InterStoreCashTransferFromCashbox", fields: [fromCashboxId], references: [id])
+  toCashbox   Cashbox  @relation("InterStoreCashTransferToCashbox", fields: [toCashboxId], references: [id])
+  currency    Currency @relation(fields: [currencyId], references: [id])
+
+  createdBy  User  @relation("InterStoreCashTransferCreatedBy", fields: [createdById], references: [id])
+  sentBy     User? @relation("InterStoreCashTransferSentBy", fields: [sentById], references: [id])
+  receivedBy User? @relation("InterStoreCashTransferReceivedBy", fields: [receivedById], references: [id])
+
+  @@index([fromStoreId, status, createdAt])
+  @@index([toStoreId, status, createdAt])
+  @@index([fromCashboxId])
+  @@index([toCashboxId])
 }
 
 model CashTransaction {
@@ -171,6 +342,46 @@ model CashTransaction {
   toCashbox     Cashbox?    @relation("TransferToCashbox", fields: [toCashboxId], references: [id])
 }
 
+model CashExchange {
+  id             String @id @default(uuid())
+  storeId        String
+  fromCashboxId  String
+  toCashboxId    String
+  fromCurrencyId String
+  toCurrencyId   String
+
+  fromAmount   Decimal              @db.Decimal(18, 2)
+  exchangeRate Decimal              @db.Decimal(18, 6)
+  toAmount     Decimal              @db.Decimal(18, 2)
+  rateMode     CashExchangeRateMode @default(MULTIPLY)
+
+  note   String?
+  status CashExchangeStatus @default(PENDING)
+
+  createdById  String
+  approvedById String?
+  rejectedById String?
+
+  createdAt  DateTime  @default(now())
+  approvedAt DateTime?
+  rejectedAt DateTime?
+  updatedAt  DateTime  @updatedAt
+
+  store        Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  fromCashbox  Cashbox  @relation("CashExchangeFromCashbox", fields: [fromCashboxId], references: [id])
+  toCashbox    Cashbox  @relation("CashExchangeToCashbox", fields: [toCashboxId], references: [id])
+  fromCurrency Currency @relation("CashExchangeFromCurrency", fields: [fromCurrencyId], references: [id])
+  toCurrency   Currency @relation("CashExchangeToCurrency", fields: [toCurrencyId], references: [id])
+
+  createdBy  User  @relation("CashExchangeCreatedBy", fields: [createdById], references: [id])
+  approvedBy User? @relation("CashExchangeApprovedBy", fields: [approvedById], references: [id])
+  rejectedBy User? @relation("CashExchangeRejectedBy", fields: [rejectedById], references: [id])
+
+  @@index([storeId, status, createdAt])
+  @@index([fromCashboxId])
+  @@index([toCashboxId])
+}
+
 model Warehouse {
   id        String   @id @default(uuid())
   storeId   String
@@ -179,11 +390,16 @@ model Warehouse {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  store           Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  stockBatches    StockBatch[]
-  stockMovements  StockMovement[]
-  inventoryCounts InventoryCount[]
-  supplierIns     SupplierIn[]
+  store                  Store                @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  stockBatches           StockBatch[]
+  stockMovements         StockMovement[]
+  inventoryCounts        InventoryCount[]
+  supplierIns            SupplierIn[]
+  transferFrom           WarehouseTransfer[]  @relation("WarehouseTransferFrom")
+  transferTo             WarehouseTransfer[]  @relation("WarehouseTransferTo")
+  supplierReturns        SupplierReturn[]
+  interStoreTransferFrom InterStoreTransfer[] @relation("InterStoreTransferFromWarehouse")
+  interStoreTransferTo   InterStoreTransfer[] @relation("InterStoreTransferToWarehouse")
 
   @@unique([storeId, name])
 }
@@ -198,19 +414,42 @@ model Supplier {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  store         Store                 @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  stockBatches  StockBatch[]
-  ledgerEntries SupplierLedgerEntry[]
-  payments      SupplierPayment[]
-  supplierIns   SupplierIn[]
+  store           Store                 @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  stockBatches    StockBatch[]
+  ledgerEntries   SupplierLedgerEntry[]
+  payments        SupplierPayment[]
+  supplierIns     SupplierIn[]
+  supplierReturns SupplierReturn[]
 
   @@unique([storeId, name])
+}
+
+model Customer {
+  id        String   @id @default(uuid())
+  storeId   String
+  fullName  String
+  phone     String?
+  address   String?
+  note      String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store          Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  sales          Sale[]
+  creditPayments CreditPayment[]
+
+  @@unique([storeId, fullName, phone])
+  @@index([storeId])
+  @@index([fullName])
+  @@index([phone])
 }
 
 model SupplierLedgerEntry {
   id          String   @id @default(uuid())
   storeId     String
   supplierId  String
+  currencyId  String
   totalAmount Float
   paidAmount  Float    @default(0)
   note        String?
@@ -219,8 +458,13 @@ model SupplierLedgerEntry {
 
   store    Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
   supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  currency Currency @relation(fields: [currencyId], references: [id])
 
   payments SupplierPayment[]
+
+  @@index([storeId])
+  @@index([supplierId])
+  @@index([currencyId])
 }
 
 model SupplierPayment {
@@ -231,6 +475,7 @@ model SupplierPayment {
   cashboxId     String?
   createdById   String?
   source        SupplierPaymentSource
+  currencyId    String
   amount        Float
   note          String?
   createdAt     DateTime              @default(now())
@@ -240,6 +485,37 @@ model SupplierPayment {
   ledgerEntry SupplierLedgerEntry? @relation(fields: [ledgerEntryId], references: [id])
   cashbox     Cashbox?             @relation(fields: [cashboxId], references: [id])
   createdBy   User?                @relation(fields: [createdById], references: [id])
+  currency    Currency             @relation(fields: [currencyId], references: [id])
+
+  @@index([storeId])
+  @@index([supplierId])
+  @@index([ledgerEntryId])
+  @@index([currencyId])
+}
+
+model CreditPayment {
+  id          String   @id @default(uuid())
+  storeId     String
+  customerId  String
+  saleId      String?
+  cashboxId   String
+  currencyId  String
+  createdById String
+  amount      Float
+  note        String?
+  createdAt   DateTime @default(now())
+
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  customer  Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  sale      Sale?    @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  cashbox   Cashbox  @relation(fields: [cashboxId], references: [id])
+  currency  Currency @relation(fields: [currencyId], references: [id])
+  createdBy User     @relation(fields: [createdById], references: [id])
+
+  @@index([storeId])
+  @@index([customerId])
+  @@index([saleId])
+  @@index([cashboxId])
 }
 
 model Category {
@@ -271,6 +547,7 @@ model ExpenseCategory {
 model Size {
   id        String   @id @default(uuid())
   name      String   @unique
+  sortOrder Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -285,17 +562,30 @@ model Product {
   brand      String?
   gender     String?
   season     String?
-  imageUrl   String?
   isActive   Boolean  @default(true)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  store    Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  category Category? @relation(fields: [categoryId], references: [id])
-
+  store    Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  category Category?        @relation(fields: [categoryId], references: [id])
   variants ProductVariant[]
+  images   ProductImage[]
 
   @@index([storeId, name])
+}
+
+model ProductImage {
+  id        String   @id @default(uuid())
+  productId String
+  imageUrl  String
+  isPrimary Boolean  @default(false)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([productId, isPrimary])
 }
 
 model ProductVariant {
@@ -303,38 +593,155 @@ model ProductVariant {
   productId String
   sizeId    String
   barcode   String?  @unique
+  sortOrder Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
   size    Size    @relation(fields: [sizeId], references: [id])
 
-  stockBatches        StockBatch[]
-  stockMovements      StockMovement[]
-  saleItems           SaleItem[]
-  inventoryCountItems InventoryCountItem[]
-  supplierInItems     SupplierInItem[]
+  stockBatches           StockBatch[]
+  stockMovements         StockMovement[]
+  saleItems              SaleItem[]
+  inventoryCountItems    InventoryCountItem[]
+  supplierInItems        SupplierInItem[]
+  warehouseTransferItems WarehouseTransferItem[]
+  SupplierReturnItem     SupplierReturnItem[]
+  InterStoreTransferItem InterStoreTransferItem[]
 
   @@unique([productId, sizeId])
+  @@index([productId, sortOrder])
+}
+
+model WarehouseTransfer {
+  id              String                  @id @default(uuid())
+  storeId         String
+  fromWarehouseId String
+  toWarehouseId   String
+  status          WarehouseTransferStatus @default(PENDING)
+  note            String?
+  createdById     String
+  approvedById    String?
+  createdAt       DateTime                @default(now())
+  approvedAt      DateTime?
+  updatedAt       DateTime                @updatedAt
+
+  store         Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  fromWarehouse Warehouse @relation("WarehouseTransferFrom", fields: [fromWarehouseId], references: [id])
+  toWarehouse   Warehouse @relation("WarehouseTransferTo", fields: [toWarehouseId], references: [id])
+  createdBy     User      @relation("WarehouseTransferCreatedBy", fields: [createdById], references: [id])
+  approvedBy    User?     @relation("WarehouseTransferApprovedBy", fields: [approvedById], references: [id])
+
+  items WarehouseTransferItem[]
+
+  @@index([storeId, status, createdAt])
+  @@index([fromWarehouseId])
+  @@index([toWarehouseId])
+  @@index([createdById])
+  @@index([approvedById])
+}
+
+model WarehouseTransferItem {
+  id               String   @id @default(uuid())
+  transferId       String
+  productVariantId String
+  sourceBatchId    String
+  quantity         Int
+  createdAt        DateTime @default(now())
+
+  transfer       WarehouseTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  productVariant ProductVariant    @relation(fields: [productVariantId], references: [id])
+  sourceBatch    StockBatch        @relation(fields: [sourceBatchId], references: [id])
+
+  @@index([transferId])
+  @@index([productVariantId])
+  @@index([sourceBatchId])
+}
+
+model InterStoreTransfer {
+  id String @id @default(uuid())
+
+  fromStoreId     String
+  toStoreId       String
+  fromWarehouseId String
+  toWarehouseId   String
+
+  status InterStoreTransferStatus @default(PENDING)
+  note   String?
+
+  createdById  String
+  sentById     String?
+  receivedById String?
+
+  createdAt  DateTime  @default(now())
+  sentAt     DateTime?
+  receivedAt DateTime?
+  updatedAt  DateTime  @updatedAt
+
+  fromStore     Store     @relation("InterStoreTransferFromStore", fields: [fromStoreId], references: [id], onDelete: Cascade)
+  toStore       Store     @relation("InterStoreTransferToStore", fields: [toStoreId], references: [id], onDelete: Cascade)
+  fromWarehouse Warehouse @relation("InterStoreTransferFromWarehouse", fields: [fromWarehouseId], references: [id])
+  toWarehouse   Warehouse @relation("InterStoreTransferToWarehouse", fields: [toWarehouseId], references: [id])
+
+  createdBy  User  @relation("InterStoreTransferCreatedBy", fields: [createdById], references: [id])
+  sentBy     User? @relation("InterStoreTransferSentBy", fields: [sentById], references: [id])
+  receivedBy User? @relation("InterStoreTransferReceivedBy", fields: [receivedById], references: [id])
+
+  items InterStoreTransferItem[]
+
+  @@index([fromStoreId, status, createdAt])
+  @@index([toStoreId, status, createdAt])
+  @@index([fromWarehouseId])
+  @@index([toWarehouseId])
+}
+
+model InterStoreTransferItem {
+  id               String   @id @default(uuid())
+  transferId       String
+  productVariantId String
+  sourceBatchId    String
+  quantity         Int
+  createdAt        DateTime @default(now())
+
+  transfer       InterStoreTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  productVariant ProductVariant     @relation(fields: [productVariantId], references: [id])
+  sourceBatch    StockBatch         @relation(fields: [sourceBatchId], references: [id])
+
+  @@index([transferId])
+  @@index([productVariantId])
+  @@index([sourceBatchId])
 }
 
 model StockBatch {
-  id                String   @id @default(uuid())
+  id                String  @id @default(uuid())
   warehouseId       String
   productVariantId  String
   supplierId        String?
   quantity          Int
   remainingQuantity Int
-  costPrice         Float
-  sellPrice         Float
-  createdAt         DateTime @default(now())
+
+  costPrice      Float
+  costCurrencyId String
+  sellPrice      Float
+  sellCurrencyId String
+
+  createdAt DateTime @default(now())
 
   warehouse      Warehouse      @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
   productVariant ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
   supplier       Supplier?      @relation(fields: [supplierId], references: [id])
 
-  stockMovements StockMovement[]
-  saleItems      SaleItem[]
+  costCurrency Currency @relation("StockBatchCostCurrency", fields: [costCurrencyId], references: [id])
+  sellCurrency Currency @relation("StockBatchSellCurrency", fields: [sellCurrencyId], references: [id])
+
+  stockMovements         StockMovement[]
+  saleItems              SaleItem[]
+  warehouseTransferItems WarehouseTransferItem[]
+  SupplierReturnItem     SupplierReturnItem[]
+  InterStoreTransferItem InterStoreTransferItem[]
+
+  @@index([costCurrencyId])
+  @@index([sellCurrencyId])
 }
 
 model StockMovement {
@@ -382,26 +789,75 @@ model SupplierInItem {
   supplierInId     String
   productVariantId String
   quantity         Int
-  costPrice        Float
-  sellPrice        Float
+
+  costPrice      Float
+  costCurrencyId String
+  sellPrice      Float
+  sellCurrencyId String
 
   supplierIn     SupplierIn     @relation(fields: [supplierInId], references: [id], onDelete: Cascade)
   productVariant ProductVariant @relation(fields: [productVariantId], references: [id])
 
+  costCurrency Currency @relation("SupplierInItemCostCurrency", fields: [costCurrencyId], references: [id])
+  sellCurrency Currency @relation("SupplierInItemSellCurrency", fields: [sellCurrencyId], references: [id])
+
   @@unique([supplierInId, productVariantId])
+  @@index([costCurrencyId])
+  @@index([sellCurrencyId])
+}
+
+model SupplierReturn {
+  id            String               @id @default(uuid())
+  storeId       String
+  warehouseId   String
+  supplierId    String
+  submittedById String
+  approvedById  String?
+  status        SupplierReturnStatus @default(PENDING)
+  note          String?
+  createdAt     DateTime             @default(now())
+  approvedAt    DateTime?
+
+  store       Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  supplier    Supplier  @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  submittedBy User      @relation("SupplierReturnSubmittedBy", fields: [submittedById], references: [id])
+  approvedBy  User?     @relation("SupplierReturnApprovedBy", fields: [approvedById], references: [id])
+
+  items SupplierReturnItem[]
+}
+
+model SupplierReturnItem {
+  id               String   @id @default(uuid())
+  supplierReturnId String
+  productVariantId String
+  sourceBatchId    String
+  quantity         Int
+  createdAt        DateTime @default(now())
+
+  supplierReturn SupplierReturn @relation(fields: [supplierReturnId], references: [id], onDelete: Cascade)
+  productVariant ProductVariant @relation(fields: [productVariantId], references: [id])
+  sourceBatch    StockBatch     @relation(fields: [sourceBatchId], references: [id])
+
+  @@index([supplierReturnId])
+  @@index([productVariantId])
+  @@index([sourceBatchId])
 }
 
 model Sale {
   id        String   @id @default(uuid())
+  saleCode  String   @unique
   storeId   String
   cashboxId String
   sellerId  String
   type      SaleType @default(CASH)
 
-  subtotalAmount Float @default(0)
-  discountAmount Float @default(0)
-  totalAmount    Float
-  paidAmount     Float
+  customerId      String?
+  subtotalAmount  Float   @default(0)
+  discountAmount  Float   @default(0)
+  totalAmount     Float
+  paidAmount      Float
+  creditDueAmount Float   @default(0)
 
   customerName  String?
   customerPhone String?
@@ -409,13 +865,18 @@ model Sale {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  store   Store   @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  cashbox Cashbox @relation(fields: [cashboxId], references: [id], onDelete: Cascade)
-  seller  User    @relation(fields: [sellerId], references: [id])
+  store    Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  cashbox  Cashbox   @relation(fields: [cashboxId], references: [id], onDelete: Cascade)
+  seller   User      @relation(fields: [sellerId], references: [id])
+  customer Customer? @relation(fields: [customerId], references: [id])
 
   items           SaleItem[]
+  creditPayments  CreditPayment[]
   returns         SaleReturn[]
   CashTransaction CashTransaction[]
+
+  @@index([storeId, type])
+  @@index([customerId])
 }
 
 model SaleItem {
@@ -423,6 +884,7 @@ model SaleItem {
   saleId           String
   productVariantId String
   batchId          String?
+  currencyId       String
   quantity         Int
 
   unitPrice      Float
@@ -434,8 +896,11 @@ model SaleItem {
   sale           Sale           @relation(fields: [saleId], references: [id], onDelete: Cascade)
   productVariant ProductVariant @relation(fields: [productVariantId], references: [id])
   batch          StockBatch?    @relation(fields: [batchId], references: [id])
+  currency       Currency       @relation(fields: [currencyId], references: [id])
 
   returnItems SaleReturnItem[]
+
+  @@index([currencyId])
 }
 
 model SaleReturn {
@@ -469,19 +934,32 @@ model SaleReturnItem {
 }
 
 model Expense {
-  id                String   @id @default(uuid())
+  id                String        @id @default(uuid())
   storeId           String
   cashboxId         String
   expenseCategoryId String?
   createdById       String?
+  approvedById      String?
+  rejectedById      String?
   amount            Float
   note              String?
-  createdAt         DateTime @default(now())
+  status            ExpenseStatus @default(PENDING)
+  createdAt         DateTime      @default(now())
+  approvedAt        DateTime?
+  rejectedAt        DateTime?
+  updatedAt         DateTime      @updatedAt
 
   store           Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
   cashbox         Cashbox          @relation(fields: [cashboxId], references: [id], onDelete: Cascade)
   expenseCategory ExpenseCategory? @relation(fields: [expenseCategoryId], references: [id])
-  createdBy       User?            @relation(fields: [createdById], references: [id])
+  createdBy       User?            @relation("ExpenseCreatedBy", fields: [createdById], references: [id])
+  approvedBy      User?            @relation("ExpenseApprovedBy", fields: [approvedById], references: [id])
+  rejectedBy      User?            @relation("ExpenseRejectedBy", fields: [rejectedById], references: [id])
+  User            User?            @relation(fields: [userId], references: [id])
+  userId          String?
+
+  @@index([storeId, status, createdAt])
+  @@index([cashboxId])
 }
 
 model InventoryCount {

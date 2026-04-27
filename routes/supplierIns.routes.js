@@ -5,6 +5,7 @@ import {
   getSupplierInById,
   approveSupplierIn,
   rejectSupplierIn,
+  updateSupplierIn
 } from '../controllers/supplierIns.controller.js';
 import {
   verifyToken,
@@ -24,5 +25,7 @@ router.get('/:supplierInId', getSupplierInById);
 router.post('/', requireRole(['DIRECTOR', 'SELLER']), createSupplierIn);
 router.post('/:supplierInId/approve', isDirector, approveSupplierIn);
 router.post('/:supplierInId/reject', isDirector, rejectSupplierIn);
+
+router.put('/:supplierInId', requireRole(['DIRECTOR', 'SELLER']), updateSupplierIn);
 
 export default router;

@@ -1,13 +1,13 @@
 import express from 'express';
 import {
-  createWarehouse,
   getWarehouses,
+  createWarehouse,
   updateWarehouse,
 } from '../controllers/warehouses.controller.js';
 import {
   verifyToken,
   resolveStoreAccess,
-  isDirector,
+  requireRole,
 } from '../middleware/auth.middleware.js';
 
 const router = express.Router();
@@ -15,8 +15,22 @@ const router = express.Router();
 router.use(verifyToken);
 router.use(resolveStoreAccess);
 
-router.get('/', getWarehouses);
-router.post('/', isDirector, createWarehouse);
-router.put('/:warehouseId', isDirector, updateWarehouse);
+router.get(
+  '/',
+  requireRole(['DIRECTOR', 'SELLER']),
+  getWarehouses
+);
+
+router.post(
+  '/',
+  requireRole(['DIRECTOR']),
+  createWarehouse
+);
+
+router.put(
+  '/:warehouseId',
+  requireRole(['DIRECTOR']),
+  updateWarehouse
+);
 
 export default router;

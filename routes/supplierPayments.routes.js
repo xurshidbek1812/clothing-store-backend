@@ -1,13 +1,13 @@
 import express from 'express';
 import {
   getSupplierBalances,
-  getSupplierLedger,
+  getSupplierLedgerHistory,
   createSupplierPayment,
 } from '../controllers/supplierPayments.controller.js';
 import {
   verifyToken,
   resolveStoreAccess,
-  isDirector,
+  requireRole,
 } from '../middleware/auth.middleware.js';
 
 const router = express.Router();
@@ -15,8 +15,22 @@ const router = express.Router();
 router.use(verifyToken);
 router.use(resolveStoreAccess);
 
-router.get('/balances', isDirector, getSupplierBalances);
-router.get('/ledger/:supplierId', isDirector, getSupplierLedger);
-router.post('/pay', isDirector, createSupplierPayment);
+router.get(
+  '/balances',
+  requireRole(['DIRECTOR', 'SELLER']),
+  getSupplierBalances
+);
+
+router.get(
+  '/:supplierId/history',
+  requireRole(['DIRECTOR', 'SELLER']),
+  getSupplierLedgerHistory
+);
+
+router.post(
+  '/',
+  requireRole(['DIRECTOR']),
+  createSupplierPayment
+);
 
 export default router;

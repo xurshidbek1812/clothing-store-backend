@@ -9,6 +9,7 @@ import {
   getSizes,
   createSize,
   updateSize,
+  reorderSizes,
   getCurrencies,
   createCurrency,
   updateCurrency,
@@ -16,29 +17,29 @@ import {
 import {
   verifyToken,
   resolveStoreAccess,
-  isDirector,
+  requireRole,
 } from '../middleware/auth.middleware.js';
 
 const router = express.Router();
 
 router.use(verifyToken);
+router.use(resolveStoreAccess);
 
-// storega bog'liq
-router.get('/categories', resolveStoreAccess, getCategories);
-router.post('/categories', resolveStoreAccess, isDirector, createCategory);
-router.put('/categories/:categoryId', resolveStoreAccess, isDirector, updateCategory);
+router.get('/categories', getCategories);
+router.post('/categories', requireRole(['DIRECTOR']), createCategory);
+router.put('/categories/:categoryId', requireRole(['DIRECTOR']), updateCategory);
 
-router.get('/expense-categories', resolveStoreAccess, getExpenseCategories);
-router.post('/expense-categories', resolveStoreAccess, isDirector, createExpenseCategory);
-router.put('/expense-categories/:expenseCategoryId', resolveStoreAccess, isDirector, updateExpenseCategory);
+router.get('/expense-categories', getExpenseCategories);
+router.post('/expense-categories', requireRole(['DIRECTOR']), createExpenseCategory);
+router.put('/expense-categories/:expenseCategoryId', requireRole(['DIRECTOR']), updateExpenseCategory);
 
-// global
 router.get('/sizes', getSizes);
-router.post('/sizes', isDirector, createSize);
-router.put('/sizes/:sizeId', isDirector, updateSize);
+router.post('/sizes', requireRole(['DIRECTOR']), createSize);
+router.put('/sizes/:sizeId', requireRole(['DIRECTOR']), updateSize);
+router.patch('/sizes/reorder', requireRole(['DIRECTOR']), reorderSizes);
 
 router.get('/currencies', getCurrencies);
-router.post('/currencies', isDirector, createCurrency);
-router.put('/currencies/:currencyId', isDirector, updateCurrency);
+router.post('/currencies', requireRole(['DIRECTOR']), createCurrency);
+router.put('/currencies/:currencyId', requireRole(['DIRECTOR']), updateCurrency);
 
 export default router;

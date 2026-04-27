@@ -42,15 +42,18 @@ export const createStore = async (req, res) => {
 
 export const getStores = async (req, res) => {
   try {
+    const isDirector = req.user?.role === 'DIRECTOR';
+
     const stores = await prisma.store.findMany({
-      where: {
-        isActive: true,
-        userStores: {
-          some: {
-            userId: req.user.id,
+      where: isDirector
+        ? {}
+        : {
+            userStores: {
+              some: {
+                userId: req.user.id,
+              },
+            },
           },
-        },
-      },
       orderBy: {
         createdAt: 'desc',
       },
@@ -68,16 +71,21 @@ export const getStores = async (req, res) => {
 export const getStoreById = async (req, res) => {
   try {
     const { storeId } = req.params;
+    const isDirector = req.user?.role === 'DIRECTOR';
 
     const store = await prisma.store.findFirst({
-      where: {
-        id: storeId,
-        userStores: {
-          some: {
-            userId: req.user.id,
+      where: isDirector
+        ? {
+            id: storeId,
+          }
+        : {
+            id: storeId,
+            userStores: {
+              some: {
+                userId: req.user.id,
+              },
+            },
           },
-        },
-      },
     });
 
     if (!store) {
@@ -99,16 +107,21 @@ export const updateStore = async (req, res) => {
   try {
     const { storeId } = req.params;
     const { name, address, isActive } = req.body;
+    const isDirector = req.user?.role === 'DIRECTOR';
 
     const existing = await prisma.store.findFirst({
-      where: {
-        id: storeId,
-        userStores: {
-          some: {
-            userId: req.user.id,
+      where: isDirector
+        ? {
+            id: storeId,
+          }
+        : {
+            id: storeId,
+            userStores: {
+              some: {
+                userId: req.user.id,
+              },
+            },
           },
-        },
-      },
     });
 
     if (!existing) {
@@ -121,7 +134,9 @@ export const updateStore = async (req, res) => {
       where: { id: storeId },
       data: {
         ...(name !== undefined ? { name: String(name).trim() } : {}),
-        ...(address !== undefined ? { address: address ? String(address).trim() : null } : {}),
+        ...(address !== undefined
+          ? { address: address ? String(address).trim() : null }
+          : {}),
         ...(isActive !== undefined ? { isActive: Boolean(isActive) } : {}),
       },
     });

@@ -184,9 +184,10 @@ export const updateExpenseCategory = async (req, res) => {
 export const getSizes = async (req, res) => {
   try {
     const sizes = await prisma.size.findMany({
-      orderBy: {
-        createdAt: 'desc',
-      },
+      orderBy: [
+        { sortOrder: 'asc' },
+        { createdAt: 'desc' },
+      ],
     });
 
     return res.json(sizes);
@@ -200,33 +201,35 @@ export const createSize = async (req, res) => {
   try {
     const { name } = req.body;
 
-    if (!name || !String(name).trim()) {
-      return res.status(400).json({ message: "name majburiy" });
+    const trimmedName = String(name || '').trim();
+
+    if (!trimmedName) {
+      return res.status(400).json({
+        message: 'Razmer nomi majburiy',
+      });
     }
 
-    const size = await prisma.size.create({
+    const lastSize = await prisma.size.findFirst({
+      orderBy: { sortOrder: 'desc' },
+      select: { sortOrder: true },
+    });
+
+    const item = await prisma.size.create({
       data: {
-        name: String(name).trim(),
+        name: trimmedName,
+        sortOrder: (lastSize?.sortOrder || 0) + 1,
       },
     });
 
     return res.status(201).json({
-      message: "Razmer yaratildi",
-      size,
+      message: 'Razmer yaratildi',
+      item,
     });
   } catch (error) {
     console.error('createSize error:', error);
-
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === 'P2002'
-    ) {
-      return res.status(400).json({
-        message: "Bu razmer allaqachon mavjud",
-      });
-    }
-
-    return res.status(500).json({ message: "Server xatosi" });
+    return res.status(500).json({
+      message: 'Server xatosi',
+    });
   }
 };
 
@@ -257,6 +260,55 @@ export const updateSize = async (req, res) => {
   } catch (error) {
     console.error('updateSize error:', error);
     return res.status(500).json({ message: "Server xatosi" });
+  }
+};
+
+export const reorderSizes = async (req, res) => {
+  try {
+    const { sizeIds } = req.body;
+
+    if (!Array.isArray(sizeIds) || sizeIds.length === 0) {
+      return res.status(400).json({
+        message: 'sizeIds array majburiy',
+      });
+    }
+
+    const existingSizes = await prisma.size.findMany({
+      select: { id: true },
+      orderBy: { sortOrder: 'asc' },
+    });
+
+    const existingIds = existingSizes.map((item) => item.id).sort();
+    const incomingIds = [...sizeIds].sort();
+
+    if (
+      existingIds.length !== incomingIds.length ||
+      existingIds.join(',') !== incomingIds.join(',')
+    ) {
+      return res.status(400).json({
+        message: "sizeIds to'liq va to'g'ri bo'lishi kerak",
+      });
+    }
+
+    await prisma.$transaction(
+      sizeIds.map((sizeId, index) =>
+        prisma.size.update({
+          where: { id: sizeId },
+          data: {
+            sortOrder: index + 1,
+          },
+        })
+      )
+    );
+
+    return res.json({
+      message: 'Razmerlar tartibi yangilandi',
+    });
+  } catch (error) {
+    console.error('reorderSizes error:', error);
+    return res.status(500).json({
+      message: 'Server xatosi',
+    });
   }
 };
 

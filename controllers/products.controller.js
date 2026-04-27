@@ -2,6 +2,15 @@ import fs from 'fs';
 import path from 'path';
 import { prisma } from '../lib/prisma.js';
 
+const removeFileIfExists = (fileUrl) => {
+  if (!fileUrl) return;
+
+  const filePath = path.join(process.cwd(), fileUrl.replace(/^\//, ''));
+  if (fs.existsSync(filePath)) {
+    fs.unlinkSync(filePath);
+  }
+};
+
 const generateNextBarcode = async (tx) => {
   const lastVariant = await tx.productVariant.findFirst({
     where: {
@@ -17,7 +26,7 @@ const generateNextBarcode = async (tx) => {
     },
   });
 
-  const base = 2000000000000;
+  const base = 10000000;
 
   if (!lastVariant?.barcode) {
     return String(base);
@@ -30,6 +39,30 @@ const generateNextBarcode = async (tx) => {
   }
 
   return String(parsed + 1);
+};
+
+const getNextVariantSortOrder = async (tx, productId) => {
+  const lastVariant = await tx.productVariant.findFirst({
+    where: { productId },
+    orderBy: { sortOrder: 'desc' },
+    select: { sortOrder: true },
+  });
+
+  return (lastVariant?.sortOrder || 0) + 1;
+};
+
+const attachPrimaryImage = (product) => {
+  const sortedImages = [...(product.images || [])].sort((a, b) => {
+    if (a.isPrimary === b.isPrimary) return (a.sortOrder || 0) - (b.sortOrder || 0);
+    return a.isPrimary ? -1 : 1;
+  });
+
+  return {
+    ...product,
+    images: sortedImages,
+    primaryImage: sortedImages[0] || null,
+    imageUrl: sortedImages[0]?.imageUrl || null,
+  };
 };
 
 export const createProduct = async (req, res) => {
@@ -45,7 +78,7 @@ export const createProduct = async (req, res) => {
 
     if (!name || !String(name).trim()) {
       return res.status(400).json({
-        message: "name majburiy",
+        message: 'name majburiy',
       });
     }
 
@@ -59,7 +92,7 @@ export const createProduct = async (req, res) => {
 
       if (!category) {
         return res.status(404).json({
-          message: "Kategoriya topilmadi",
+          message: 'Kategoriya topilmadi',
         });
       }
     }
@@ -73,7 +106,7 @@ export const createProduct = async (req, res) => {
     for (const item of variants) {
       if (!item.sizeId) {
         return res.status(400).json({
-          message: "Har bir variant uchun sizeId majburiy",
+          message: 'Har bir variant uchun sizeId majburiy',
         });
       }
 
@@ -103,76 +136,101 @@ export const createProduct = async (req, res) => {
       if (variants.length) {
         for (const item of variants) {
           const barcode = await generateNextBarcode(tx);
+          const sortOrder = await getNextVariantSortOrder(tx, createdProduct.id);
 
           await tx.productVariant.create({
             data: {
               productId: createdProduct.id,
               sizeId: item.sizeId,
               barcode,
+              sortOrder,
             },
           });
         }
       }
 
-      return tx.product.findUnique({
+      const fullProduct = await tx.product.findUnique({
         where: { id: createdProduct.id },
         include: {
           category: true,
+          images: {
+            orderBy: [{ isPrimary: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
+          },
           variants: {
             include: {
               size: true,
             },
+            orderBy: {
+              sortOrder: 'asc',
+            },
           },
         },
       });
+
+      return attachPrimaryImage(fullProduct);
     });
 
     return res.status(201).json({
-      message: "Tovar yaratildi",
+      message: 'Tovar yaratildi',
       product,
     });
   } catch (error) {
     console.error('createProduct error:', error);
     return res.status(500).json({
-      message: "Server xatosi",
+      message: 'Server xatosi',
     });
   }
 };
 
 export const getProducts = async (req, res) => {
   try {
-    const search = req.query.search ? String(req.query.search).trim() : '';
-    const categoryId = req.query.categoryId ? String(req.query.categoryId) : null;
-
-    const where = {
-      storeId: req.storeId,
-      isActive: true,
-      ...(categoryId ? { categoryId } : {}),
-      ...(search
-        ? {
-            OR: [
-              { name: { contains: search, mode: 'insensitive' } },
-              { brand: { contains: search, mode: 'insensitive' } },
-              {
-                variants: {
-                  some: {
-                    barcode: { contains: search, mode: 'insensitive' },
-                  },
-                },
-              },
-            ],
-          }
-        : {}),
-    };
+    const search = String(req.query.search || '').trim();
+    const warehouseId = req.query.warehouseId ? String(req.query.warehouseId) : null;
 
     const products = await prisma.product.findMany({
-      where,
+      where: {
+        storeId: req.storeId,
+        ...(search
+          ? {
+              OR: [
+                { name: { contains: search, mode: 'insensitive' } },
+                { brand: { contains: search, mode: 'insensitive' } },
+                {
+                  variants: {
+                    some: {
+                      size: {
+                        name: { contains: search, mode: 'insensitive' },
+                      },
+                    },
+                  },
+                },
+              ],
+            }
+          : {}),
+      },
       include: {
         category: true,
+        images: {
+          orderBy: [{ isPrimary: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
+        },
         variants: {
           include: {
             size: true,
             stockBatches: {
+              where: warehouseId
+                ? {
+                    warehouseId,
+                    warehouse: {
+                      storeId: req.storeId,
+                      isActive: true,
+                    },
+                  }
+                : {
+                    warehouse: {
+                      storeId: req.storeId,
+                      isActive: true,
+                    },
+                  },
               select: {
                 id: true,
                 remainingQuantity: true,
@@ -181,6 +239,9 @@ export const getProducts = async (req, res) => {
               },
             },
           },
+          orderBy: {
+            sortOrder: 'asc',
+          },
         },
       },
       orderBy: {
@@ -188,24 +249,28 @@ export const getProducts = async (req, res) => {
       },
     });
 
-    const mapped = products.map((product) => ({
-      ...product,
-      totalStock: product.variants.reduce((sum, variant) => {
+    const mapped = products.map((product) => {
+      const totalStock = product.variants.reduce((sum, variant) => {
         return (
           sum +
           variant.stockBatches.reduce(
-            (batchSum, batch) => batchSum + batch.remainingQuantity,
+            (batchSum, batch) => batchSum + Number(batch.remainingQuantity || 0),
             0
           )
         );
-      }, 0),
-    }));
+      }, 0);
+
+      return attachPrimaryImage({
+        ...product,
+        totalStock,
+      });
+    });
 
     return res.json(mapped);
   } catch (error) {
     console.error('getProducts error:', error);
     return res.status(500).json({
-      message: "Server xatosi",
+      message: 'Server xatosi',
     });
   }
 };
@@ -221,6 +286,9 @@ export const getProductById = async (req, res) => {
       },
       include: {
         category: true,
+        images: {
+          orderBy: [{ isPrimary: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
+        },
         variants: {
           include: {
             size: true,
@@ -234,21 +302,24 @@ export const getProductById = async (req, res) => {
               },
             },
           },
+          orderBy: {
+            sortOrder: 'asc',
+          },
         },
       },
     });
 
     if (!product) {
       return res.status(404).json({
-        message: "Tovar topilmadi",
+        message: 'Tovar topilmadi',
       });
     }
 
-    return res.json(product);
+    return res.json(attachPrimaryImage(product));
   } catch (error) {
     console.error('getProductById error:', error);
     return res.status(500).json({
-      message: "Server xatosi",
+      message: 'Server xatosi',
     });
   }
 };
@@ -267,7 +338,7 @@ export const updateProduct = async (req, res) => {
 
     if (!existing) {
       return res.status(404).json({
-        message: "Tovar topilmadi",
+        message: 'Tovar topilmadi',
       });
     }
 
@@ -281,7 +352,7 @@ export const updateProduct = async (req, res) => {
 
       if (!category) {
         return res.status(404).json({
-          message: "Kategoriya topilmadi",
+          message: 'Kategoriya topilmadi',
         });
       }
     }
@@ -298,17 +369,28 @@ export const updateProduct = async (req, res) => {
       },
       include: {
         category: true,
+        images: {
+          orderBy: [{ isPrimary: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
+        },
+        variants: {
+          include: {
+            size: true,
+          },
+          orderBy: {
+            sortOrder: 'asc',
+          },
+        },
       },
     });
 
     return res.json({
-      message: "Tovar yangilandi",
-      product,
+      message: 'Tovar yangilandi',
+      product: attachPrimaryImage(product),
     });
   } catch (error) {
     console.error('updateProduct error:', error);
     return res.status(500).json({
-      message: "Server xatosi",
+      message: 'Server xatosi',
     });
   }
 };
@@ -320,7 +402,7 @@ export const addVariantToProduct = async (req, res) => {
 
     if (!sizeId) {
       return res.status(400).json({
-        message: "sizeId majburiy",
+        message: 'sizeId majburiy',
       });
     }
 
@@ -333,7 +415,7 @@ export const addVariantToProduct = async (req, res) => {
 
     if (!product) {
       return res.status(404).json({
-        message: "Tovar topilmadi",
+        message: 'Tovar topilmadi',
       });
     }
 
@@ -343,7 +425,7 @@ export const addVariantToProduct = async (req, res) => {
 
     if (!size) {
       return res.status(404).json({
-        message: "Size topilmadi",
+        message: 'Size topilmadi',
       });
     }
 
@@ -362,12 +444,14 @@ export const addVariantToProduct = async (req, res) => {
 
     const variant = await prisma.$transaction(async (tx) => {
       const barcode = await generateNextBarcode(tx);
+      const sortOrder = await getNextVariantSortOrder(tx, productId);
 
       return tx.productVariant.create({
         data: {
           productId,
           sizeId,
           barcode,
+          sortOrder,
         },
         include: {
           size: true,
@@ -382,7 +466,144 @@ export const addVariantToProduct = async (req, res) => {
   } catch (error) {
     console.error('addVariantToProduct error:', error);
     return res.status(500).json({
-      message: "Server xatosi",
+      message: 'Server xatosi',
+    });
+  }
+};
+
+export const removeVariantFromProduct = async (req, res) => {
+  try {
+    const { productId, variantId } = req.params;
+
+    const variant = await prisma.productVariant.findFirst({
+      where: {
+        id: variantId,
+        productId,
+        product: {
+          storeId: req.storeId,
+        },
+      },
+      include: {
+        size: true,
+        stockBatches: {
+          select: {
+            id: true,
+            remainingQuantity: true,
+          },
+        },
+        saleItems: {
+          select: { id: true },
+          take: 1,
+        },
+        supplierInItems: {
+          select: { id: true },
+          take: 1,
+        },
+        stockMovements: {
+          select: { id: true },
+          take: 1,
+        },
+        inventoryCountItems: {
+          select: { id: true },
+          take: 1,
+        },
+      },
+    });
+
+    if (!variant) {
+      return res.status(404).json({
+        message: 'Variant topilmadi',
+      });
+    }
+
+    const hasRemainingStock = variant.stockBatches.some(
+      (batch) => Number(batch.remainingQuantity || 0) > 0
+    );
+
+    const hasHistory =
+      variant.saleItems.length > 0 ||
+      variant.supplierInItems.length > 0 ||
+      variant.stockMovements.length > 0 ||
+      variant.inventoryCountItems.length > 0 ||
+      variant.stockBatches.length > 0;
+
+    if (hasRemainingStock || hasHistory) {
+      return res.status(400).json({
+        message: `${variant.size?.name || 'Bu razmer'} ni o‘chirib bo‘lmaydi. Unda qoldiq yoki tarix mavjud.`,
+      });
+    }
+
+    await prisma.productVariant.delete({
+      where: {
+        id: variantId,
+      },
+    });
+
+    return res.json({
+      message: `${variant.size?.name || 'Razmer'} olib tashlandi`,
+    });
+  } catch (error) {
+    console.error('removeVariantFromProduct error:', error);
+    return res.status(500).json({
+      message: 'Server xatosi',
+    });
+  }
+};
+
+export const reorderProductVariants = async (req, res) => {
+  try {
+    const { productId } = req.params;
+    const { variantIds } = req.body;
+
+    if (!Array.isArray(variantIds) || variantIds.length === 0) {
+      return res.status(400).json({
+        message: 'variantIds array majburiy',
+      });
+    }
+
+    const product = await prisma.product.findFirst({
+      where: {
+        id: productId,
+        storeId: req.storeId,
+      },
+      include: {
+        variants: {
+          select: { id: true },
+        },
+      },
+    });
+
+    if (!product) {
+      return res.status(404).json({
+        message: 'Tovar topilmadi',
+      });
+    }
+
+    const existingIds = product.variants.map((v) => v.id).sort();
+    const incomingIds = [...variantIds].sort();
+
+    if (existingIds.length !== incomingIds.length || existingIds.join(',') !== incomingIds.join(',')) {
+      return res.status(400).json({
+        message: "variantIds to'liq va to'g'ri bo'lishi kerak",
+      });
+    }
+
+    await prisma.$transaction(
+      variantIds.map((variantId, index) =>
+        prisma.productVariant.update({
+          where: { id: variantId },
+          data: { sortOrder: index + 1 },
+        })
+      )
+    );
+
+    return res.json({
+      message: 'Razmerlar tartibi yangilandi',
+    });
+  } catch (error) {
+    console.error('reorderProductVariants error:', error);
+    return res.status(500).json({
+      message: 'Server xatosi',
     });
   }
 };
@@ -395,7 +616,7 @@ export const getAvailableBatches = async (req, res) => {
 
     if (!productVariantId) {
       return res.status(400).json({
-        message: "productVariantId majburiy",
+        message: 'productVariantId majburiy',
       });
     }
 
@@ -408,14 +629,20 @@ export const getAvailableBatches = async (req, res) => {
         },
       },
       include: {
-        product: true,
+        product: {
+          include: {
+            images: {
+              orderBy: [{ isPrimary: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
+            },
+          },
+        },
         size: true,
       },
     });
 
     if (!variant) {
       return res.status(404).json({
-        message: "Variant topilmadi",
+        message: 'Variant topilmadi',
       });
     }
 
@@ -439,15 +666,17 @@ export const getAvailableBatches = async (req, res) => {
       },
     });
 
+    const productWithPrimary = attachPrimaryImage(variant.product);
+
     return res.json({
       productVariant: {
         id: variant.id,
-        barcode: variant.barcode,
         size: variant.size.name,
         product: {
-          id: variant.product.id,
-          name: variant.product.name,
-          brand: variant.product.brand,
+          id: productWithPrimary.id,
+          name: productWithPrimary.name,
+          brand: productWithPrimary.brand,
+          imageUrl: productWithPrimary.imageUrl,
         },
       },
       batches: batches.map((batch) => ({
@@ -465,7 +694,7 @@ export const getAvailableBatches = async (req, res) => {
   } catch (error) {
     console.error('getAvailableBatches error:', error);
     return res.status(500).json({
-      message: "Server xatosi",
+      message: 'Server xatosi',
     });
   }
 };
@@ -478,22 +707,6 @@ export const searchProductsForSupplierIn = async (req, res) => {
     if (!q) {
       return res.json([]);
     }
-
-    const sizeOrder = [
-      'XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL',
-      '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46',
-    ];
-
-    const getSizeSortValue = (sizeName = '') => {
-      const normalized = String(sizeName).trim().toUpperCase();
-      const fixedIndex = sizeOrder.indexOf(normalized);
-      if (fixedIndex !== -1) return fixedIndex;
-
-      const asNumber = Number(normalized);
-      if (!Number.isNaN(asNumber)) return 1000 + asNumber;
-
-      return 2000 + normalized.charCodeAt(0);
-    };
 
     const products = await prisma.product.findMany({
       where: {
@@ -520,9 +733,15 @@ export const searchProductsForSupplierIn = async (req, res) => {
       },
       include: {
         category: true,
+        images: {
+          orderBy: [{ isPrimary: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
+        },
         variants: {
           include: {
             size: true,
+          },
+          orderBy: {
+            sortOrder: 'asc',
           },
         },
       },
@@ -533,19 +752,11 @@ export const searchProductsForSupplierIn = async (req, res) => {
       take: limit,
     });
 
-    const result = products.map((product) => ({
-      ...product,
-      variants: [...(product.variants || [])].sort(
-        (a, b) =>
-          getSizeSortValue(a.size?.name || '') - getSizeSortValue(b.size?.name || '')
-      ),
-    }));
-
-    return res.json(result);
+    return res.json(products.map(attachPrimaryImage));
   } catch (error) {
     console.error('searchProductsForSupplierIn error:', error);
     return res.status(500).json({
-      message: "Server xatosi",
+      message: 'Server xatosi',
     });
   }
 };
@@ -558,6 +769,9 @@ export const uploadProductImage = async (req, res) => {
       where: {
         id: productId,
         storeId: req.storeId,
+      },
+      include: {
+        images: true,
       },
     });
 
@@ -573,23 +787,26 @@ export const uploadProductImage = async (req, res) => {
       });
     }
 
-    if (product.imageUrl) {
-      const oldPath = path.join(process.cwd(), product.imageUrl.replace(/^\//, ''));
-      if (fs.existsSync(oldPath)) {
-        fs.unlinkSync(oldPath);
-      }
-    }
-
     const imageUrl = `/uploads/products/${req.file.filename}`;
 
-    const updated = await prisma.product.update({
-      where: { id: productId },
-      data: { imageUrl },
+    const lastImage = await prisma.productImage.findFirst({
+      where: { productId },
+      orderBy: { sortOrder: 'desc' },
+      select: { sortOrder: true },
+    });
+
+    const createdImage = await prisma.productImage.create({
+      data: {
+        productId,
+        imageUrl,
+        isPrimary: product.images.length === 0,
+        sortOrder: (lastImage?.sortOrder || 0) + 1,
+      },
     });
 
     return res.json({
       message: 'Tovar rasmi yuklandi',
-      product: updated,
+      image: createdImage,
     });
   } catch (error) {
     console.error('uploadProductImage error:', error);
@@ -601,39 +818,107 @@ export const uploadProductImage = async (req, res) => {
 
 export const deleteProductImage = async (req, res) => {
   try {
-    const { productId } = req.params;
+    const { imageId } = req.params;
 
-    const product = await prisma.product.findFirst({
+    const image = await prisma.productImage.findFirst({
       where: {
-        id: productId,
-        storeId: req.storeId,
+        id: imageId,
+        product: {
+          storeId: req.storeId,
+        },
+      },
+      include: {
+        product: {
+          include: {
+            images: true,
+          },
+        },
       },
     });
 
-    if (!product) {
+    if (!image) {
       return res.status(404).json({
-        message: 'Tovar topilmadi',
+        message: 'Rasm topilmadi',
       });
     }
 
-    if (product.imageUrl) {
-      const filePath = path.join(process.cwd(), product.imageUrl.replace(/^\//, ''));
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
-    }
-
-    const updated = await prisma.product.update({
-      where: { id: productId },
-      data: { imageUrl: null },
+    await prisma.productImage.delete({
+      where: { id: imageId },
     });
+
+    removeFileIfExists(image.imageUrl);
+
+    const remainingImages = image.product.images.filter((img) => img.id !== image.id);
+
+    if (image.isPrimary && remainingImages.length > 0) {
+      const nextPrimary = [...remainingImages].sort((a, b) => {
+        if ((a.sortOrder || 0) === (b.sortOrder || 0)) {
+          return new Date(a.createdAt) - new Date(b.createdAt);
+        }
+        return (a.sortOrder || 0) - (b.sortOrder || 0);
+      })[0];
+
+      await prisma.productImage.update({
+        where: { id: nextPrimary.id },
+        data: { isPrimary: true },
+      });
+    }
 
     return res.json({
       message: 'Tovar rasmi o‘chirildi',
-      product: updated,
     });
   } catch (error) {
     console.error('deleteProductImage error:', error);
+    return res.status(500).json({
+      message: 'Server xatosi',
+    });
+  }
+};
+
+export const setPrimaryProductImage = async (req, res) => {
+  try {
+    const { imageId } = req.params;
+
+    const image = await prisma.productImage.findFirst({
+      where: {
+        id: imageId,
+        product: {
+          storeId: req.storeId,
+        },
+      },
+      include: {
+        product: true,
+      },
+    });
+
+    if (!image) {
+      return res.status(404).json({
+        message: 'Rasm topilmadi',
+      });
+    }
+
+    await prisma.$transaction([
+      prisma.productImage.updateMany({
+        where: {
+          productId: image.productId,
+        },
+        data: {
+          isPrimary: false,
+        },
+      }),
+      prisma.productImage.update({
+        where: { id: imageId },
+        data: {
+          isPrimary: true,
+        },
+      }),
+    ]);
+
+    return res.json({
+      message: 'Asosiy rasm belgilandi',
+    });
+  } catch (error) {
+    console.error('setPrimaryProductImage error:', error);
     return res.status(500).json({
       message: 'Server xatosi',
     });

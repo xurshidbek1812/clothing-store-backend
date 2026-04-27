@@ -63,6 +63,8 @@ export const createSupplierIn = async (req, res) => {
 
       if (
         !item.productVariantId ||
+        !item.costCurrencyId ||
+        !item.sellCurrencyId ||
         Number.isNaN(quantity) ||
         Number.isNaN(costPrice) ||
         Number.isNaN(sellPrice) ||
@@ -71,7 +73,8 @@ export const createSupplierIn = async (req, res) => {
         sellPrice < 0
       ) {
         return res.status(400).json({
-          message: "Har bir item uchun productVariantId, quantity, costPrice, sellPrice to'g'ri bo'lishi kerak",
+          message:
+            "Har bir item uchun productVariantId, quantity, costPrice, costCurrencyId, sellPrice, sellCurrencyId to'g'ri bo'lishi kerak",
         });
       }
 
@@ -91,11 +94,30 @@ export const createSupplierIn = async (req, res) => {
         });
       }
 
+      const [costCurrency, sellCurrency] = await Promise.all([
+        prisma.currency.findUnique({
+          where: { id: item.costCurrencyId },
+          select: { id: true },
+        }),
+        prisma.currency.findUnique({
+          where: { id: item.sellCurrencyId },
+          select: { id: true },
+        }),
+      ]);
+
+      if (!costCurrency || !sellCurrency) {
+        return res.status(404).json({
+          message: "Currency topilmadi",
+        });
+      }
+
       normalizedItems.push({
         productVariantId: item.productVariantId,
         quantity,
         costPrice,
+        costCurrencyId: item.costCurrencyId,
         sellPrice,
+        sellCurrencyId: item.sellCurrencyId,
       });
     }
 
@@ -122,6 +144,8 @@ export const createSupplierIn = async (req, res) => {
         },
         items: {
           include: {
+            costCurrency: true,
+            sellCurrency: true,
             productVariant: {
               include: {
                 size: true,
@@ -181,6 +205,8 @@ export const getSupplierIns = async (req, res) => {
           },
           items: {
             include: {
+              costCurrency: true,
+              sellCurrency: true,
               productVariant: {
                 include: {
                   size: true,
@@ -242,6 +268,8 @@ export const getSupplierInById = async (req, res) => {
         },
         items: {
           include: {
+            costCurrency: true,
+            sellCurrency: true,
             productVariant: {
               include: {
                 size: true,
@@ -282,7 +310,18 @@ export const approveSupplierIn = async (req, res) => {
         storeId: req.storeId,
       },
       include: {
-        items: true,
+        items: {
+          include: {
+            costCurrency: true,
+            sellCurrency: true,
+            productVariant: {
+              include: {
+                size: true,
+                product: true,
+              },
+            },
+          },
+        },
       },
     });
 
@@ -298,10 +337,22 @@ export const approveSupplierIn = async (req, res) => {
       });
     }
 
-    const totalAmount = supplierIn.items.reduce(
-      (sum, item) => sum + Number(item.quantity || 0) * Number(item.costPrice || 0),
-      0
-    );
+    for (const item of supplierIn.items) {
+      if (!item.costCurrencyId || !item.sellCurrencyId) {
+        return res.status(400).json({
+          message: "Kirim itemlarida currency to'liq tanlanmagan",
+        });
+      }
+    }
+
+    const groupedTotals = new Map();
+
+    for (const item of supplierIn.items) {
+      const lineTotal =
+        Number(item.quantity || 0) * Number(item.costPrice || 0);
+      const prev = groupedTotals.get(item.costCurrencyId) || 0;
+      groupedTotals.set(item.costCurrencyId, prev + lineTotal);
+    }
 
     const txResult = await prisma.$transaction(
       async (tx) => {
@@ -314,7 +365,9 @@ export const approveSupplierIn = async (req, res) => {
               quantity: item.quantity,
               remainingQuantity: item.quantity,
               costPrice: item.costPrice,
+              costCurrencyId: item.costCurrencyId,
               sellPrice: item.sellPrice,
+              sellCurrencyId: item.sellCurrencyId,
             },
             select: {
               id: true,
@@ -335,18 +388,27 @@ export const approveSupplierIn = async (req, res) => {
           });
         }
 
-        const ledgerEntry = await tx.supplierLedgerEntry.create({
-          data: {
-            storeId: req.storeId,
-            supplierId: supplierIn.supplierId,
-            totalAmount,
-            paidAmount: 0,
-            note: supplierIn.note || "Taminotchidan tovar kirimi",
-          },
-          select: {
-            id: true,
-          },
-        });
+        const createdLedgerEntries = [];
+
+        for (const [currencyId, totalAmount] of groupedTotals.entries()) {
+          const ledgerEntry = await tx.supplierLedgerEntry.create({
+            data: {
+              storeId: req.storeId,
+              supplierId: supplierIn.supplierId,
+              currencyId,
+              totalAmount,
+              paidAmount: 0,
+              note: supplierIn.note || "Taminotchidan tovar kirimi",
+            },
+            select: {
+              id: true,
+              currencyId: true,
+              totalAmount: true,
+            },
+          });
+
+          createdLedgerEntries.push(ledgerEntry);
+        }
 
         await tx.supplierIn.update({
           where: { id: supplierInId },
@@ -358,7 +420,7 @@ export const approveSupplierIn = async (req, res) => {
         });
 
         return {
-          ledgerEntryId: ledgerEntry.id,
+          ledgerEntries: createdLedgerEntries,
         };
       },
       {
@@ -391,6 +453,8 @@ export const approveSupplierIn = async (req, res) => {
         },
         items: {
           include: {
+            costCurrency: true,
+            sellCurrency: true,
             productVariant: {
               include: {
                 size: true,
@@ -402,16 +466,24 @@ export const approveSupplierIn = async (req, res) => {
       },
     });
 
-    const ledgerEntry = await prisma.supplierLedgerEntry.findUnique({
+    const ledgerEntries = await prisma.supplierLedgerEntry.findMany({
       where: {
-        id: txResult.ledgerEntryId,
+        id: {
+          in: txResult.ledgerEntries.map((item) => item.id),
+        },
+      },
+      include: {
+        currency: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
       },
     });
 
     return res.json({
       message: "Kirim hujjati tasdiqlandi",
       supplierIn: approvedSupplierIn,
-      ledgerEntry,
+      ledgerEntries,
     });
   } catch (error) {
     console.error('approveSupplierIn error:', error);
@@ -472,6 +544,8 @@ export const rejectSupplierIn = async (req, res) => {
         },
         items: {
           include: {
+            costCurrency: true,
+            sellCurrency: true,
             productVariant: {
               include: {
                 size: true,
@@ -489,6 +563,231 @@ export const rejectSupplierIn = async (req, res) => {
     });
   } catch (error) {
     console.error('rejectSupplierIn error:', error);
+    return res.status(500).json({
+      message: "Server xatosi",
+    });
+  }
+};
+
+export const updateSupplierIn = async (req, res) => {
+  try {
+    const { supplierInId } = req.params;
+    const { warehouseId, supplierId, note, items } = req.body;
+
+    if (!warehouseId || !supplierId || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({
+        message: "warehouseId, supplierId va items majburiy",
+      });
+    }
+
+    const existingSupplierIn = await prisma.supplierIn.findFirst({
+      where: {
+        id: supplierInId,
+        storeId: req.storeId,
+      },
+      include: {
+        items: true,
+      },
+    });
+
+    if (!existingSupplierIn) {
+      return res.status(404).json({
+        message: "Kirim hujjati topilmadi",
+      });
+    }
+
+    if (existingSupplierIn.status !== SupplierInStatus.PENDING) {
+      return res.status(400).json({
+        message: "Faqat Jarayonda turgan hujjatni tahrirlash mumkin",
+      });
+    }
+
+    const warehouse = await prisma.warehouse.findFirst({
+      where: {
+        id: warehouseId,
+        storeId: req.storeId,
+        isActive: true,
+      },
+    });
+
+    if (!warehouse) {
+      return res.status(404).json({
+        message: "Ombor topilmadi",
+      });
+    }
+
+    const supplier = await prisma.supplier.findFirst({
+      where: {
+        id: supplierId,
+        storeId: req.storeId,
+        isActive: true,
+      },
+    });
+
+    if (!supplier) {
+      return res.status(404).json({
+        message: "Taminotchi topilmadi",
+      });
+    }
+
+    const normalizedItems = [];
+    const seenVariantIds = new Set();
+
+    for (const item of items) {
+      const quantity = Number(item.quantity);
+      const costPrice = Number(item.costPrice);
+      const sellPrice = Number(item.sellPrice);
+
+      if (
+        !item.productVariantId ||
+        !item.costCurrencyId ||
+        !item.sellCurrencyId ||
+        Number.isNaN(quantity) ||
+        Number.isNaN(costPrice) ||
+        Number.isNaN(sellPrice) ||
+        quantity <= 0 ||
+        costPrice < 0 ||
+        sellPrice < 0
+      ) {
+        return res.status(400).json({
+          message:
+            "Har bir item uchun productVariantId, quantity, costPrice, costCurrencyId, sellPrice, sellCurrencyId to'g'ri bo'lishi kerak",
+        });
+      }
+
+      if (seenVariantIds.has(item.productVariantId)) {
+        return res.status(400).json({
+          message: "Bir xil variantni ikki marta qo'shib bo'lmaydi",
+        });
+      }
+
+      seenVariantIds.add(item.productVariantId);
+
+      const variant = await prisma.productVariant.findFirst({
+        where: {
+          id: item.productVariantId,
+          product: {
+            storeId: req.storeId,
+            isActive: true,
+          },
+        },
+      });
+
+      if (!variant) {
+        return res.status(404).json({
+          message: `Variant topilmadi: ${item.productVariantId}`,
+        });
+      }
+
+      const [costCurrency, sellCurrency] = await Promise.all([
+        prisma.currency.findUnique({
+          where: { id: item.costCurrencyId },
+          select: { id: true },
+        }),
+        prisma.currency.findUnique({
+          where: { id: item.sellCurrencyId },
+          select: { id: true },
+        }),
+      ]);
+
+      if (!costCurrency || !sellCurrency) {
+        return res.status(404).json({
+          message: "Currency topilmadi",
+        });
+      }
+
+      normalizedItems.push({
+        productVariantId: item.productVariantId,
+        quantity,
+        costPrice,
+        costCurrencyId: item.costCurrencyId,
+        sellPrice,
+        sellCurrencyId: item.sellCurrencyId,
+      });
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.supplierIn.update({
+        where: { id: supplierInId },
+        data: {
+          warehouseId,
+          supplierId,
+          note: note ? String(note).trim() : null,
+        },
+      });
+
+      await tx.supplierInItem.deleteMany({
+        where: {
+          supplierInId,
+        },
+      });
+
+      await tx.supplierInItem.createMany({
+        data: normalizedItems.map((item) => ({
+          supplierInId,
+          productVariantId: item.productVariantId,
+          quantity: item.quantity,
+          costPrice: item.costPrice,
+          costCurrencyId: item.costCurrencyId,
+          sellPrice: item.sellPrice,
+          sellCurrencyId: item.sellCurrencyId,
+        })),
+      });
+
+      return tx.supplierIn.findFirst({
+        where: {
+          id: supplierInId,
+          storeId: req.storeId,
+        },
+        include: {
+          warehouse: true,
+          supplier: true,
+          submittedBy: {
+            select: {
+              id: true,
+              fullName: true,
+              username: true,
+            },
+          },
+          approvedBy: {
+            select: {
+              id: true,
+              fullName: true,
+              username: true,
+            },
+          },
+          items: {
+            include: {
+              costCurrency: true,
+              sellCurrency: true,
+              productVariant: {
+                include: {
+                  size: true,
+                  product: {
+                    include: {
+                      images: {
+                        orderBy: [
+                          { isPrimary: 'desc' },
+                          { sortOrder: 'asc' },
+                          { createdAt: 'asc' },
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+    });
+
+    return res.json({
+      message: "Kirim hujjati yangilandi",
+      supplierIn: updated,
+    });
+  } catch (error) {
+    console.error('updateSupplierIn error:', error);
     return res.status(500).json({
       message: "Server xatosi",
     });

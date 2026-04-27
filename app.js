@@ -5,7 +5,6 @@ import path from 'path';
 import authRoutes from './routes/auth.routes.js';
 import storesRoutes from './routes/stores.routes.js';
 import productRoutes from './routes/products.routes.js';
-import incomeRoutes from './routes/incomes.routes.js';
 import cashboxRoutes from './routes/cashboxes.routes.js';
 import transferRoutes from './routes/transfers.routes.js';
 import salesRoutes from './routes/sales.routes.js';
@@ -21,6 +20,13 @@ import referenceRoutes from './routes/reference.routes.js';
 import dashboardRoutes from './routes/dashboard.routes.js';
 import supplierPaymentsRoutes from './routes/supplierPayments.routes.js';
 import supplierInsRoutes from './routes/supplierIns.routes.js';
+import customersRoutes from './routes/customers.routes.js';
+import interStoreTransfersRoutes from './routes/interStoreTransfers.routes.js';
+import inventoryRoutes from './routes/inventory.routes.js';
+import cashboxTransfersRoutes from './routes/cashboxTransfers.routes.js';
+import interStoreCashTransfersRoutes from './routes/interStoreCashTransfers.routes.js';
+import expensesRoutes from './routes/expenses.routes.js';
+import cashExchangesRoutes from './routes/cashExchanges.routes.js';
 
 const app = express();
 
@@ -43,7 +49,6 @@ app.get('/', (_req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/stores', storesRoutes);
 app.use('/api/products', productRoutes);
-app.use('/api/incomes', incomeRoutes);
 app.use('/api/cashboxes', cashboxRoutes);
 app.use('/api/transfers', transferRoutes);
 app.use('/api/sales', salesRoutes);
@@ -59,5 +64,12 @@ app.use('/api/reference', referenceRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/supplier-payments', supplierPaymentsRoutes);
 app.use('/api/supplier-ins', supplierInsRoutes);
+app.use('/api/customers', customersRoutes);
+app.use('/api/inter-store-transfers', interStoreTransfersRoutes);
+app.use('/api/inventory', inventoryRoutes);
+app.use('/api/cashbox-transfers', cashboxTransfersRoutes);
+app.use('/api/inter-store-cash-transfers', interStoreCashTransfersRoutes);
+app.use('/api/expenses', expensesRoutes);
+app.use('/api/cash-exchanges', cashExchangesRoutes);
 
 export default app;

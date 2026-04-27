@@ -34,6 +34,7 @@ export const getSalesHistory = async (req, res) => {
 
     if (q) {
       where.OR = [
+        { saleCode: { contains: q, mode: 'insensitive' } },
         { note: { contains: q, mode: 'insensitive' } },
         { seller: { fullName: { contains: q, mode: 'insensitive' } } },
         { seller: { username: { contains: q, mode: 'insensitive' } } },
@@ -71,6 +72,26 @@ export const getSalesHistory = async (req, res) => {
               currency: true,
             },
           },
+          items: {
+            select: {
+              id: true,
+              currencyId: true,
+              totalPrice: true,
+              currency: true,
+            },
+          },
+          CashTransaction: {
+            include: {
+              cashbox: {
+                include: {
+                  currency: true,
+                },
+              },
+            },
+            orderBy: {
+              createdAt: 'asc',
+            },
+          },
           _count: {
             select: {
               items: true,
@@ -103,8 +124,11 @@ export const getSaleById = async (req, res) => {
 
     const sale = await prisma.sale.findFirst({
       where: {
-        id: saleId,
         storeId: req.storeId,
+        OR: [
+          { id: saleId },
+          { saleCode: saleId },
+        ],
       },
       include: {
         seller: {
@@ -121,6 +145,8 @@ export const getSaleById = async (req, res) => {
         },
         items: {
           include: {
+            returnItems: true,
+            currency: true,
             productVariant: {
               include: {
                 size: true,
@@ -130,6 +156,7 @@ export const getSaleById = async (req, res) => {
             batch: {
               include: {
                 warehouse: true,
+                sellCurrency: true,
               },
             },
           },
